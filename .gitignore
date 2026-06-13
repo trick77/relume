@@ -9,3 +9,4 @@ relume.json
 
 # Logs
 *.log
+/dist/
