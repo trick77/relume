@@ -80,6 +80,7 @@ type serveOptions struct {
 	discoveryBurstInterval time.Duration
 	identityProfile        string
 	ssdpMediaServerAlias   bool
+	ssdpDescriptorVariants bool
 }
 
 func parseServeOptions(args []string) (serveOptions, error) {
@@ -93,6 +94,7 @@ func parseServeOptions(args []string) (serveOptions, error) {
 	burstInterval := fs.Duration("discovery-burst-interval", time.Second, "interval for discovery-burst announcements")
 	identityProfile := fs.String("identity-profile", "", "experimental identity profile: empty/default, ambilight, or hass")
 	ssdpMediaServerAlias := fs.Bool("ssdp-media-server-alias", false, "also advertise/respond as UPnP MediaServer:1 for Philips TV discovery experiments")
+	ssdpDescriptorVariants := fs.Bool("ssdp-descriptor-variants", false, "also advertise query-scoped descriptor variants for Philips TV discovery experiments")
 	if err := fs.Parse(args); err != nil {
 		return serveOptions{}, err
 	}
@@ -106,6 +108,7 @@ func parseServeOptions(args []string) (serveOptions, error) {
 		discoveryBurstInterval: *burstInterval,
 		identityProfile:        *identityProfile,
 		ssdpMediaServerAlias:   *ssdpMediaServerAlias,
+		ssdpDescriptorVariants: *ssdpDescriptorVariants,
 	}, nil
 }
 
@@ -147,6 +150,7 @@ func runServe(args []string, log *slog.Logger) error {
 	responder.BurstInterval = opts.discoveryBurstInterval
 	responder.IdentityProfile = opts.identityProfile
 	responder.MediaServerAlias = opts.ssdpMediaServerAlias
+	responder.DescriptorVariants = opts.ssdpDescriptorVariants
 	announcer := mdns.New(cfg.Identity, ip, opts.httpPort, log)
 	announcer.IdentityProfile = opts.identityProfile
 	announcer.BurstDuration = opts.discoveryBurstDuration

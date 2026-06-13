@@ -17,6 +17,7 @@ func TestParseServeOptions_discoveryDiagnostics(t *testing.T) {
 		"-discovery-burst-interval", "1s",
 		"-identity-profile", "ambilight",
 		"-ssdp-media-server-alias",
+		"-ssdp-descriptor-variants",
 	})
 
 	// Then
@@ -49,5 +50,8 @@ func TestParseServeOptions_discoveryDiagnostics(t *testing.T) {
 	}
 	if !opts.ssdpMediaServerAlias {
 		t.Fatal("ssdpMediaServerAlias = false")
+	}
+	if !opts.ssdpDescriptorVariants {
+		t.Fatal("ssdpDescriptorVariants = false")
 	}
 }

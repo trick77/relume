@@ -43,6 +43,9 @@ type Responder struct {
 	// MediaServerAlias also advertises/responds as UPnP MediaServer:1. Some
 	// Philips Android TVs only emit MediaServer searches during Hue+Ambilight scan.
 	MediaServerAlias bool
+	// DescriptorVariants adds extra query-scoped LOCATION URLs under the
+	// MediaServer ST so one TV scan can reveal which descriptor body it fetches.
+	DescriptorVariants bool
 }
 
 // New creates a Responder. advIP is the IP advertised in the LOCATION header
@@ -222,9 +225,10 @@ func (r *Responder) searchResponses() []string {
 }
 
 type ssdpVariant struct {
-	st  string
-	nt  string
-	usn string
+	st       string
+	nt       string
+	usn      string
+	location string
 }
 
 func (v ssdpVariant) maxAge() int {
@@ -236,8 +240,8 @@ func (v ssdpVariant) maxAge() int {
 
 func (r *Responder) location(v ssdpVariant) string {
 	location := fmt.Sprintf("http://%s:%d/description.xml", r.advIP, r.httpPort)
-	if v.st == mediaServerST || v.nt == mediaServerST {
-		return location + "?relume=ms1"
+	if v.location != "" {
+		return location + "?relume=" + v.location
 	}
 	return location
 }
@@ -255,9 +259,18 @@ func (r *Responder) ssdpVariants() []ssdpVariant {
 	}
 	if r.MediaServerAlias {
 		variants = append(variants, ssdpVariant{
-			st:  mediaServerST,
-			nt:  mediaServerST,
-			usn: "uuid:" + uuid + "::" + mediaServerST,
+			st:       mediaServerST,
+			nt:       mediaServerST,
+			usn:      "uuid:" + uuid + "::" + mediaServerST,
+			location: "ms1",
+		})
+	}
+	if r.MediaServerAlias && r.DescriptorVariants {
+		variants = append(variants, ssdpVariant{
+			st:       mediaServerST,
+			nt:       mediaServerST,
+			usn:      "uuid:" + uuid + "::" + mediaServerST,
+			location: "basic1",
 		})
 	}
 	return variants
