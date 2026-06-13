@@ -34,13 +34,13 @@ func TestLoad_GeneratesAndPersistsIdentity(t *testing.T) {
 		t.Fatalf("serial length = %d", len(c1.Identity.Serial))
 	}
 
-	// Then: erneutes Laden liefert dieselbe Identität (stabil/persistiert)
+	// Then: loading again returns the same identity (stable/persisted)
 	c2, err := Load(path)
 	if err != nil {
 		t.Fatalf("Load 2: %v", err)
 	}
 	if c1.Identity.Serial != c2.Identity.Serial {
-		t.Errorf("serial nicht stabil: %q != %q", c1.Identity.Serial, c2.Identity.Serial)
+		t.Errorf("serial not stable: %q != %q", c1.Identity.Serial, c2.Identity.Serial)
 	}
 }
 
@@ -57,6 +57,6 @@ func TestAddApiUser_Persists(t *testing.T) {
 	// Then
 	reloaded, _ := Load(path)
 	if !reloaded.HasApiUser("abc123") {
-		t.Error("ApiUser nicht persistiert")
+		t.Error("ApiUser not persisted")
 	}
 }

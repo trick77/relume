@@ -1,135 +1,90 @@
-# relume — Plan & Stand
+# relume — plan & status
 
-Software-Bridge, die einen **Philips Ambilight-TV** mit einer **Hue Bridge Pro (BSB003)**
-verbindet, indem sie sich gegenüber dem TV als alte Gen-2-Bridge (BSB002) ausgibt und alle
-Befehle über HTTPS/CLIP-v2 an die echte Bridge Pro weiterreicht.
+Software bridge connecting a **Philips Ambilight TV** to a **Hue Bridge Pro (BSB003)** by
+emulating an old gen-2 bridge (BSB002) toward the TV and proxying everything to the real
+Bridge Pro over HTTPS/CLIP v2.
 
 ```
-Ambilight-TV  ──HTTP:80 + SSDP + DTLS:2100──▶  relume  ──HTTPS:443 + DTLS:2100──▶  Bridge Pro  ──Zigbee──▶  Lampen
+Ambilight TV  ──mDNS/SSDP + HTTP──▶  relume  ──HTTPS/CLIP v2──▶  Hue Bridge Pro  ──Zigbee──▶  lights
 ```
 
-## Warum
+## Why
 
-Die Bridge Pro bricht den Ambilight+Hue-Pfad an drei Stellen:
-1. **Kein SSDP/UPnP mehr** — nur noch mDNS + Cloud; die TV-Firmware sucht aber per SSDP `M-SEARCH` und erwartet `/description.xml`.
-2. **Nur HTTPS:443** — kein Plain-HTTP:80; die TV-Firmware ist auf HTTP verdrahtet.
-3. **Nur CLIP v2** — die v1-Discovery-/Pairing-Pfade des TVs lösen nicht mehr auf.
+The Bridge Pro breaks the Ambilight+Hue path in three ways:
+1. **No SSDP/UPnP** — only mDNS + cloud; the TV firmware expects to discover via the local bridge.
+2. **HTTPS:443 only** — no plain HTTP:80 (returns 301); the TV firmware is wired for HTTP.
+3. **CLIP v2 only** — the v1 discovery/pairing paths the TV uses no longer resolve.
 
-**Ground Truth** (verifiziert via diyHue-Quellcode, das nachweislich Ambilight-TVs bedient):
-Der TV versucht **zuerst die Entertainment-API** (DTLS-PSK über UDP 2100, ~25–50 Hz, binäre
-`HueStream`-Frames) und fällt nur auf **CLIP-v1-REST** (`PUT /groups/{id}/action`, ~10 Hz,
-drosselt → laggy) zurück. Der bei der Kopplung erzeugte `clientkey` ist der DTLS-PSK.
+## Decisions
 
-## Entscheidungen
+| Topic | Decision |
+|------|----------|
+| Base | Standalone Go proxy (diyHue is reference only, not a fork) |
+| Language | Go |
+| Deployment | Docker with `network_mode: host` (multicast discovery needs the TV's L2) |
+| Lights | Proxied live from the Bridge Pro |
+| Path | Full: Entertainment + REST fallback |
+| Bridge Pro setup | One-time pairing; pin the TLS certificate (default), `-skip-tls-verify` fallback |
+| File naming | `Containerfile`, `compose.yaml`; CI workflows `.yaml` |
 
-| Thema | Entscheidung |
-|------|--------------|
-| Basis | Eigenständiger Go-Proxy (diyHue nur als Referenz, kein Fork) |
-| Sprache | Go |
-| Deployment | Docker mit `--network=host` (SSDP-Multicast braucht dasselbe L2-Netz) |
-| Lampen | Live von Bridge Pro proxen |
-| Pfad | Voll: Entertainment + REST-Fallback |
-| Bridge-Pro-Setup | Einmalige Kopplung; TLS-Zertifikat pinnen (Default), `skip-verify` als Fallback |
+## Architecture
 
-## Architektur
+**Frontend (TV-facing, emulates BSB002):**
+- `internal/ssdp` — multicast responder (M-SEARCH) + periodic NOTIFY ssdp:alive.
+- `internal/mdns` — active `_hue._tcp` announcer (`Philips Hue - XXXXXX`, TXT bridgeid+modelid=BSB002).
+- `internal/upnp` — `/description.xml` with the BSB002 identity.
+- `internal/clipv1` — HTTP server: pairing (`POST /api`, link window), `config`, lights/groups, REST control.
 
-**Frontend (TV-seitig, emuliert BSB002):**
-- `internal/ssdp` — Multicast-Responder (M-SEARCH) + NOTIFY ssdp:alive. Header verifiziert:
-  `SERVER: Linux/3.14.0 UPnP/1.0 IpBridge/1.20.0`, `hue-bridgeid`, `USN: uuid:2f402f80-...`.
-- `internal/upnp` — `/description.xml` mit `modelName=Philips hue bridge 2015`, `modelNumber=BSB002`.
-- `internal/clipv1` — HTTP:80: Pairing (`POST /api`, Link-Fenster), `config`, Datastore,
-  Lampen/Gruppen, Stream-Aktivierung.
-- `internal/entertainment` — DTLS-PSK-Server UDP 2100 (PSK = TV-clientkey). *[M4]*
-- `internal/huestream` — HueStream-Frames parsen + encodieren (v1 16B / v2 52B-Header). *[M4]*
+**Backend (Bridge Pro-facing, acts as a Hue app):**
+- `internal/bridgepro` — CLIP v2 client (HTTPS + cert pinning), pairing, resource reads, REST control. *(Entertainment client: M4)*
 
-**Backend (Bridge-Pro-seitig, agiert als Hue-App):**
-- `internal/bridgepro` — CLIP-v2-Client (HTTPS:443): Ressourcen lesen, REST-Steuerung,
-  Entertainment-Config aktivieren; DTLS-PSK-Client zur Pro. TLS gepinnt. *[M2–M4]*
+**Core:**
+- `internal/config` — persistent state: identity, TV tokens, Pro pairing, light mapping.
+- `internal/translate` — v1↔v2 translation + v1-id↔UUID mapping.
+- `internal/bridge` — wiring frontend↔backend.
+- `internal/diag` — passive mDNS observer (debug).
+- `cmd/relume` — `serve` (default), `setup`, `discover`, `link`, `avahi-service`, `version`.
 
-**Kern:**
-- `internal/config` — persistenter Zustand: Identität, TV-Tokens, Pro-Kopplung, Mapping.
-- `internal/translate` — v1↔v2-Übersetzung + Lampen-/Channel-Mapping. *[M2+]*
-- `internal/bridge` — Lifecycle/Verdrahtung Frontend↔Backend. *[M2+]*
-- `cmd/relume` — `serve` (Default), `link` (Pairing-Fenster), `setup` (Pro koppeln *[M2]*).
+## Milestones
 
-**Datenfluss Entertainment:** TV koppelt → liest Lampen/Groups → `PUT /groups/{id}
-{"stream":{"active":true}}` → relume aktiviert Entertainment-Config auf der Pro, öffnet
-DTLS-Client zur Pro:2100 und DTLS-Server für den TV → TV-Frames werden geparst, ge-remappt,
-als HueStream-v2 an die Pro gestreamt. Stream-Stop → deaktivieren.
+- **M1 — Discovery & pairing** ✅ done & verified. TV finds & pairs the bridge.
+- **M2 — Bridge Pro client** ✅ done & verified on the real BSB003. CLIP v2 client (HTTPS +
+  cert pinning), `setup`/`discover`, v2→v1 light list (16 lights via the proxy).
+- **M3 — REST control** ✅ light control done & verified (real lamp switched). `PUT lights/{id}/state`
+  → v1→v2 → Pro (207/errors handled). Group path is still a logged stub (completed with M4).
+- **mDNS discovery** ✅ implemented (active `_hue._tcp` announce) + `avahi-service` command.
+  Final TV-detection test pending on Linux (see below).
+- **M4 — Entertainment** ⏳ open. `huestream` (+tests), DTLS server (TV) + DTLS client (Pro),
+  entertainment-config activation, stream forwarding. Goal: smooth Ambilight.
+- **M5 — Packaging** ✅ done. Containerfile (static, multi-stage), `compose.yaml` (host networking),
+  README, CI (test + release to ghcr.io). Image builds.
 
-## Meilensteine
+## Discovery finding (measured on the real Philips TV)
 
-- **M1 — Discovery & Pairing** ✅ **FERTIG & verifiziert.** TV findet & koppelt die Bridge.
-- **M2 — Bridge-Pro-Anbindung** ✅ **FERTIG & am echten Gerät (BSB003) verifiziert.**
-  `bridgepro`-CLIP-v2-Client (HTTPS + Cert-Pinning), `discover`- und `setup`-Befehl
-  (Link-Button an der Pro → App-Key + clientkey holen), `translate` v2→v1-Lampenliste.
-  Verifiziert: HTTPS-only-Annahme bestätigt (HTTP:80 → 301), Pinning, Pairing, 16 Lampen
-  über den Proxy als v1-Liste.
-- **M3 — REST-Fallback** ✅ **Lampen-Steuerung FERTIG & am echten Gerät verifiziert.**
-  `PUT lights/{id}/state` → v1→v2-Übersetzung → CLIP-v2-PUT an die Pro (207/errors-Array
-  ausgewertet). Request-Logging ergänzt (um reales TV-Verhalten zu beobachten).
-  Reale Lampe über den Proxy geschaltet. **Offen:** Gruppen-Pfad (`groups/{id}/action`,
-  Gruppen-Listing) ist noch ein geloggter Stub — wird mit M4 anhand des realen TV-Verhaltens
-  vervollständigt.
-- **Discovery (mDNS)** ✅ **implementiert** (`internal/mdns`, aktiver `_hue._tcp`-Announce
-  als `Philips Hue - XXXXXX`/BSB002) + `avahi-service`-Befehl für avahi-Hosts. **Befund am
-  realen TV (siehe unten).** Verifizierung der TV-Erkennung steht noch aus (auf Linux-Ziel).
-- **M4 — Entertainment** ⏳ offen. `huestream` (+Tests), DTLS-Server (TV) + DTLS-Client (Pro),
-  Entertainment-Config-Aktivierung, Stream-Forwarding. *Ziel:* flüssiges Ambilight.
-- **M5 — Packaging** ✅ **FERTIG.** Containerfile (statisch, multi-stage), `compose.yaml`
-  (`network_mode: host`), Persistenz unter `./data`, README mit Deployment + Caveats.
-  Docker-Image baut.
+- The TV (a 2021/22 Philips Android TV) sends SSDP M-SEARCH **only** for `MediaServer` (DLNA) —
+  never anything Hue-related, never fetches `/description.xml`. **→ no SSDP for Hue.**
+- **No cloud:** no DNS lookup for `discovery.meethue.com` (checked). Cloud discovery ruled out.
+- **No active `_hue._tcp` query.** Conclusion (consistent with diyHue): the TV **listens passively**
+  for the bridge's `_hue._tcp` mDNS announcement. relume announces exactly that.
+- The real Bridge Pro itself announces `_hue._tcp` as `Hue Bridge - XXXXXX` / `modelid=BSB003`;
+  the TV likely filters BSB003 out. relume announces `Philips Hue - XXXXXX` / `modelid=BSB002`.
+- UDP 10102 broadcasts from the TV are DTS Play-Fi (audio) — a red herring, unrelated to Hue.
+- macOS is an unusable test environment: the system mDNSResponder owns port 5353, so relume's
+  built-in announcer cannot bind it. Final TV test belongs on single-homed Linux (the NAS).
 
-## Discovery-Befund (am realen Philips-TV gemessen)
+## Open items (verify on the real device)
 
-- Der TV (IP .112) sendet SSDP-M-SEARCH **nur** für `MediaServer` (DLNA) — **nie** etwas
-  Hue-bezogenes, nie `/description.xml`/`/api`. **→ Der TV nutzt für die Hue-Suche kein SSDP.**
-- Die echte Bridge Pro **announct selbst mDNS** `_hue._tcp` als `Hue Bridge - XXXXXX`,
-  `modelid=BSB003`. relume announct `Philips Hue - XXXXXX`, `modelid=BSB002` (Format von
-  hass-emulated-hue, das vom TV gefunden wird; diyHue-Name wird NICHT gefunden — #988).
-- **macOS-Testumgebung untauglich:** System-`mDNSResponder` belegt Port 5353 → relumes
-  Go-zeroconf-Announce greift dort nicht (Workaround im Test: `dns-sd -R` über System-Bonjour).
-  Auf single-homed Linux ohne/mit konfiguriertem avahi sauber → finaler TV-Test dort.
-- Mögliche Cloud-Suppression: `relume discover` lieferte die echte Bridge aus der Philips-Cloud.
-  Falls der TV trotz korrektem mDNS nichts findet → `discovery.meethue.com` per DNS umbiegen.
+- **TV detection of relume via mDNS on the Linux target** (the decisive open test).
+- Exact `HueStream` v2 layout (52-byte header, channel chunks).
+- Exact CLIP v2 calls to create/activate the `entertainment_configuration` on the Pro.
+- Whether the TV requires a specific `swversion`/`apiversion` to attempt Entertainment.
+- The exact `devicetype` string the TV sends to `POST /api`; whether the TV uses the
+  mDNS-advertised port or hardcodes 80.
 
-## Offene Punkte (am echten Gerät verifizieren)
-
-- **TV-Erkennung von relume per mDNS auf dem Linux-Ziel** (entscheidender offener Test).
-- Exaktes `HueStream`-v2-Layout (52-Byte-Header, Channel-Chunks).
-- Genaue CLIP-v2-Calls zum Anlegen/Aktivieren der `entertainment_configuration` auf der Pro.
-- Ob der TV ein bestimmtes `swversion`/`apiversion` braucht, um Entertainment zu versuchen.
-- Exakter `devicetype`-String, den der TV bei `POST /api` schickt; ob der TV den per mDNS
-  beworbenen Port nutzt oder 80 hartcodiert.
-
-## Aktueller Stand (M1)
-
-Implementiert und getestet:
-- `internal/config` — stabile Identität (12-Hex-Serial → BridgeID/UUID), persistenter JSON-Zustand, ApiUser-Verwaltung.
-- `internal/ssdp` — Multicast-Listener + sofortige M-SEARCH-Antwort + periodisches NOTIFY.
-- `internal/upnp` — `/description.xml` mit BSB002-Kennung.
-- `internal/clipv1` — Pairing mit 30s-Link-Fenster (Fehler 101 ohne Druck), `username`+`clientkey`,
-  `config` (`modelid=BSB002`), Datastore, Lampen/Gruppen als Platzhalter; Web-UI + `/link`.
-- `cmd/relume` — `serve`/`link`, IP-Auto-Detektion.
-
-### Bauen & Laufen lassen
+## Build / test
 
 ```bash
-go build ./...
+go build -o relume ./cmd/relume
 go test ./...
-
-# Lokaler Smoke-Test (Port 80 braucht root; hier 8080):
-go run ./cmd/relume serve -http-port 8080 -advertise-ip <deine-ip> -config ./relume.json
-
-# In Produktion (Port 80, Discovery via SSDP):
-sudo ./relume serve            # oder via Docker --network=host
-
-# Pairing-Fenster öffnen (statt physischem Link-Button):
-./relume link                  # oder Web-UI: http://<bridge-ip>/
+go run ./cmd/relume serve -debug -http-port 8080 -advertise-ip <ip> -config ./relume.json
 ```
-
-### Verifiziert (Smoke-Test)
-- `/description.xml` liefert BSB002 + konsistente UUID.
-- Pairing ohne Link-Button → Fehler `type:101`.
-- Pairing nach Link-Druck → `username` (32 Hex) + `clientkey` (32 Hex uppercase).
-- `/api/{user}/config` → `modelid=BSB002`, `bridgeid` konsistent zur Serial.

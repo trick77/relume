@@ -1,9 +1,9 @@
-// Package mdns kündigt relume aktiv per mDNS/Bonjour als Hue-Bridge an
-// (_hue._tcp.local.). Moderne Philips-TVs (und die Bridge Pro selbst) finden die
-// Bridge primär so; sie lauschen passiv auf das Announcement und stellen oft gar
-// keine eigene Anfrage. Das Format folgt dem nachweislich vom Ambilight-TV
-// gefundenen hass-emulated-hue: Instanzname "Philips Hue - XXXXXX", TXT mit
-// bridgeid und modelid=BSB002.
+// Package mdns actively announces relume as a Hue bridge via mDNS/Bonjour
+// (_hue._tcp.local.). Modern Philips TVs (and the Bridge Pro itself) find the
+// bridge primarily this way; they passively listen for the announcement and
+// often make no request of their own. The format follows hass-emulated-hue,
+// which the Ambilight TV is known to discover: instance name
+// "Philips Hue - XXXXXX", TXT with bridgeid and modelid=BSB002.
 package mdns
 
 import (
@@ -21,7 +21,7 @@ const (
 	domain  = "local."
 )
 
-// Announcer hält die mDNS-Registrierung am Leben.
+// Announcer keeps the mDNS registration alive.
 type Announcer struct {
 	id    config.Identity
 	advIP string
@@ -29,13 +29,13 @@ type Announcer struct {
 	log   *slog.Logger
 }
 
-// New erstellt einen Announcer. port ist der beworbene SRV-Port (i.d.R. der
-// HTTP-Port der emulierten Bridge).
+// New creates an Announcer. port is the advertised SRV port (usually the
+// HTTP port of the emulated bridge).
 func New(id config.Identity, advIP string, port int, log *slog.Logger) *Announcer {
 	return &Announcer{id: id, advIP: advIP, port: port, log: log}
 }
 
-// Run registriert den Service und hält ihn bis ctx beendet wird.
+// Run registers the service and keeps it alive until ctx is cancelled.
 func (a *Announcer) Run(ctx context.Context) error {
 	bridgeID := a.id.BridgeID()
 	instance := "Philips Hue - " + bridgeID[len(bridgeID)-6:]
@@ -46,7 +46,7 @@ func (a *Announcer) Run(ctx context.Context) error {
 
 	var ifaces []net.Interface
 	if iface, err := interfaceForIP(a.advIP); err != nil {
-		a.log.Warn("mdns: interface zur advertise-ip nicht gefunden, nutze alle", "err", err)
+		a.log.Warn("mdns: interface for advertise IP not found, using all", "err", err)
 	} else {
 		ifaces = []net.Interface{*iface}
 	}
@@ -57,18 +57,18 @@ func (a *Announcer) Run(ctx context.Context) error {
 	}
 	defer server.Shutdown()
 
-	a.log.Info("mdns: als hue-bridge announct",
+	a.log.Info("mdns: announced as hue bridge",
 		"instance", instance, "service", service, "port", a.port, "bridgeid", bridgeID)
 
 	<-ctx.Done()
 	return ctx.Err()
 }
 
-// interfaceForIP liefert das Multicast-fähige Interface, das die gegebene IP trägt.
+// interfaceForIP returns the multicast-capable interface that carries the given IP.
 func interfaceForIP(ip string) (*net.Interface, error) {
 	target := net.ParseIP(ip)
 	if target == nil {
-		return nil, fmt.Errorf("ungültige IP %q", ip)
+		return nil, fmt.Errorf("invalid IP %q", ip)
 	}
 	ifaces, err := net.Interfaces()
 	if err != nil {
@@ -88,5 +88,5 @@ func interfaceForIP(ip string) (*net.Interface, error) {
 			}
 		}
 	}
-	return nil, fmt.Errorf("kein multicast-faehiges interface mit IP %s", ip)
+	return nil, fmt.Errorf("no multicast-capable interface with IP %s", ip)
 }

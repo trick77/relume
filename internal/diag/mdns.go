@@ -1,6 +1,6 @@
-// Package diag enthält Diagnose-Helfer, um das Discovery-Verhalten von Clients
-// (insbesondere Ambilight-TVs) zu analysieren: Welches Verfahren nutzt ein TV, um
-// eine Hue-Bridge zu finden — lokales SSDP, mDNS oder die Philips-Cloud?
+// Package diag contains diagnostic helpers to analyze the discovery behavior of
+// clients (in particular Ambilight TVs): which method does a TV use to find a
+// Hue bridge — local SSDP, mDNS or the Philips cloud?
 package diag
 
 import (
@@ -14,20 +14,20 @@ import (
 
 const mdnsGroup = "224.0.0.251:5353"
 
-// MDNSObserver lauscht passiv auf mDNS und protokolliert Hue-bezogene Anfragen
-// (_hue._tcp). Er antwortet NICHT — er dient nur der Analyse, ob ein TV per mDNS
-// nach der Bridge sucht.
+// MDNSObserver passively listens for mDNS and logs Hue-related queries
+// (_hue._tcp). It does NOT respond — it only serves to analyze whether a TV
+// searches for the bridge via mDNS.
 type MDNSObserver struct {
 	advIP string
 	log   *slog.Logger
 }
 
-// NewMDNSObserver erstellt einen Observer; advIP wählt das Interface (Multi-NIC).
+// NewMDNSObserver creates an Observer; advIP selects the interface (multi-NIC).
 func NewMDNSObserver(advIP string, log *slog.Logger) *MDNSObserver {
 	return &MDNSObserver{advIP: advIP, log: log}
 }
 
-// Run lauscht bis ctx beendet wird.
+// Run listens until ctx is cancelled.
 func (o *MDNSObserver) Run(ctx context.Context) error {
 	addr, err := net.ResolveUDPAddr("udp4", mdnsGroup)
 	if err != nil {
@@ -35,14 +35,14 @@ func (o *MDNSObserver) Run(ctx context.Context) error {
 	}
 	iface, ierr := interfaceForIP(o.advIP)
 	if ierr != nil {
-		o.log.Warn("mdns: interface zur advertise-ip nicht gefunden, nutze default", "err", ierr)
+		o.log.Warn("mdns: interface for advertise IP not found, using default", "err", ierr)
 	}
 	conn, err := net.ListenMulticastUDP("udp4", iface, addr)
 	if err != nil {
 		return fmt.Errorf("mdns listen: %w", err)
 	}
 	defer conn.Close()
-	o.log.Info("mdns-observer gestartet (lauscht auf _hue._tcp-Anfragen)")
+	o.log.Info("mdns observer started (listening for _hue._tcp queries)")
 
 	buf := make([]byte, 65536)
 	for {
@@ -65,11 +65,11 @@ func (o *MDNSObserver) Run(ctx context.Context) error {
 
 func deadline() time.Time { return time.Now().Add(time.Second) }
 
-// interfaceForIP liefert das Multicast-fähige Interface, das die gegebene IP trägt.
+// interfaceForIP returns the multicast-capable interface that carries the given IP.
 func interfaceForIP(ip string) (*net.Interface, error) {
 	target := net.ParseIP(ip)
 	if target == nil {
-		return nil, fmt.Errorf("ungültige IP %q", ip)
+		return nil, fmt.Errorf("invalid IP %q", ip)
 	}
 	ifaces, err := net.Interfaces()
 	if err != nil {
@@ -89,20 +89,20 @@ func interfaceForIP(ip string) (*net.Interface, error) {
 			}
 		}
 	}
-	return nil, fmt.Errorf("kein multicast-faehiges interface mit IP %s", ip)
+	return nil, fmt.Errorf("no multicast-capable interface with IP %s", ip)
 }
 
-// inspect parst die Fragen einer mDNS-Nachricht und loggt Hue-Bezüge.
+// inspect parses the questions of an mDNS message and logs Hue references.
 func (o *MDNSObserver) inspect(src *net.UDPAddr, msg []byte) {
 	names := dnsQuestionNames(msg)
 	for _, name := range names {
 		if strings.Contains(strings.ToLower(name), "hue") {
-			o.log.Info("mdns: hue-bezogene anfrage", "from", src.IP.String(), "name", name)
+			o.log.Info("mdns: hue-related query", "from", src.IP.String(), "name", name)
 		}
 	}
 }
 
-// dnsQuestionNames extrahiert die QNAMEs aus einer DNS/mDNS-Nachricht (best effort).
+// dnsQuestionNames extracts the QNAMEs from a DNS/mDNS message (best effort).
 func dnsQuestionNames(msg []byte) []string {
 	if len(msg) < 12 {
 		return nil
@@ -121,7 +121,7 @@ func dnsQuestionNames(msg []byte) []string {
 	return names
 }
 
-// readName liest einen (ggf. komprimierten) DNS-Namen ab Offset off.
+// readName reads a (possibly compressed) DNS name starting at offset off.
 func readName(msg []byte, off int) (string, int, bool) {
 	var labels []string
 	jumped := false
@@ -135,7 +135,7 @@ func readName(msg []byte, off int) (string, int, bool) {
 				next = off
 			}
 			return strings.Join(labels, "."), next, true
-		case l&0xC0 == 0xC0: // Pointer (Komprimierung)
+		case l&0xC0 == 0xC0: // Pointer (compression)
 			if off+1 >= len(msg) {
 				return "", off, false
 			}

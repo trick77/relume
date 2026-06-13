@@ -1,5 +1,5 @@
-// Package bridge verdrahtet das TV-seitige Frontend (clipv1) mit dem
-// Bridge-Pro-seitigen Backend (bridgepro) und hält das Lampen-Mapping.
+// Package bridge wires the TV-side frontend (clipv1) to the
+// Bridge-Pro-side backend (bridgepro) and holds the light mapping.
 package bridge
 
 import (
@@ -11,11 +11,11 @@ import (
 	"github.com/trick77/relume/internal/translate"
 )
 
-// lightCacheTTL begrenzt, wie oft die Bridge Pro nach Lampen gefragt wird.
+// lightCacheTTL limits how often the Bridge Pro is queried for lights.
 const lightCacheTTL = 5 * time.Second
 
-// LightProvider implementiert clipv1.LightProvider auf Basis der Bridge Pro und
-// hält das v1→UUID-Mapping für die spätere Steuerung (M3).
+// LightProvider implements clipv1.LightProvider on top of the Bridge Pro and
+// holds the v1→UUID mapping for later control (M3).
 type LightProvider struct {
 	client *bridgepro.Client
 
@@ -25,12 +25,12 @@ type LightProvider struct {
 	fetchedAt time.Time
 }
 
-// NewLightProvider erstellt einen Provider für die gegebene Bridge Pro.
+// NewLightProvider creates a provider for the given Bridge Pro.
 func NewLightProvider(client *bridgepro.Client) *LightProvider {
 	return &LightProvider{client: client}
 }
 
-// LightsV1 liefert die v1-Lampenliste (mit kurzem Cache).
+// LightsV1 returns the v1 light list (with a short cache).
 func (p *LightProvider) LightsV1() (map[string]any, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -48,7 +48,7 @@ func (p *LightProvider) LightsV1() (map[string]any, error) {
 	return p.cached, nil
 }
 
-// UUIDForV1 liefert die v2-UUID zu einer numerischen v1-Light-ID.
+// UUIDForV1 returns the v2 UUID for a numeric v1 light ID.
 func (p *LightProvider) UUIDForV1(v1id string) (string, bool) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -56,17 +56,17 @@ func (p *LightProvider) UUIDForV1(v1id string) (string, bool) {
 	return uuid, ok
 }
 
-// SetLightV1 setzt den Zustand einer Lampe anhand ihrer v1-ID. Der v1-State wird
-// nach v2 übersetzt und an die Bridge Pro weitergereicht (REST-Fallback-Pfad).
+// SetLightV1 sets the state of a light by its v1 ID. The v1 state is
+// translated to v2 and forwarded to the Bridge Pro (REST fallback path).
 func (p *LightProvider) SetLightV1(v1id string, v1state map[string]any) error {
 	uuid, ok := p.UUIDForV1(v1id)
 	if !ok {
-		// Mapping ggf. noch nicht aufgebaut → einmal Lampen laden und erneut prüfen.
+		// Mapping may not be built yet → load lights once and check again.
 		if _, err := p.LightsV1(); err != nil {
 			return err
 		}
 		if uuid, ok = p.UUIDForV1(v1id); !ok {
-			return fmt.Errorf("unbekannte light-id %q", v1id)
+			return fmt.Errorf("unknown light id %q", v1id)
 		}
 	}
 	return p.client.SetLight(uuid, translate.StateV1ToV2(v1state))

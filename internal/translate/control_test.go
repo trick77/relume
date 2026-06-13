@@ -6,7 +6,7 @@ import (
 )
 
 func TestStateV1ToV2(t *testing.T) {
-	// Given: ein typischer Ambilight-v1-State mit on/bri/xy/transitiontime
+	// Given: a typical Ambilight v1 state with on/bri/xy/transitiontime
 	v1 := map[string]any{
 		"on":             true,
 		"bri":            float64(254),
@@ -23,7 +23,7 @@ func TestStateV1ToV2(t *testing.T) {
 	}
 	dim := v2["dimming"].(map[string]any)
 	if dim["brightness"].(float64) != 100 {
-		t.Errorf("brightness = %v, erwartet 100", dim["brightness"])
+		t.Errorf("brightness = %v, expected 100", dim["brightness"])
 	}
 	col := v2["color"].(map[string]any)["xy"].(map[string]any)
 	if col["x"] != 0.3 || col["y"] != 0.4 {
@@ -31,19 +31,19 @@ func TestStateV1ToV2(t *testing.T) {
 	}
 	dyn := v2["dynamics"].(map[string]any)
 	if dyn["duration"] != 100 {
-		t.Errorf("duration = %v, erwartet 100ms", dyn["duration"])
+		t.Errorf("duration = %v, expected 100ms", dyn["duration"])
 	}
 }
 
 func TestStateV1ToV2_ctOnly(t *testing.T) {
-	// Given: nur Weiss-/CT-Steuerung
+	// Given: only white/CT control
 	v2 := StateV1ToV2(map[string]any{"on": false, "ct": float64(300)})
 
 	// Then
 	if _, hasColor := v2["color"]; hasColor {
-		t.Error("color sollte nicht gesetzt sein")
+		t.Error("color should not be set")
 	}
 	if v2["color_temperature"].(map[string]any)["mirek"] != 300 {
-		t.Errorf("mirek falsch: %#v", v2["color_temperature"])
+		t.Errorf("mirek wrong: %#v", v2["color_temperature"])
 	}
 }

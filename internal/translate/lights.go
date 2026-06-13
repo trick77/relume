@@ -1,6 +1,6 @@
-// Package translate übersetzt zwischen dem CLIP-v2-Modell der Bridge Pro und der
-// CLIP-v1-Darstellung, die der Ambilight-TV erwartet, inklusive eines stabilen
-// Mappings zwischen v1-Light-IDs (numerisch) und v2-Ressourcen-UUIDs.
+// Package translate translates between the CLIP v2 model of the Bridge Pro and the
+// CLIP v1 representation that the Ambilight TV expects, including a stable
+// mapping between v1 light IDs (numeric) and v2 resource UUIDs.
 package translate
 
 import (
@@ -9,17 +9,17 @@ import (
 	"github.com/trick77/relume/internal/bridgepro"
 )
 
-// LightMap hält die v1-Darstellung der Lampen und das ID-Mapping für die Steuerung.
+// LightMap holds the v1 representation of the lights and the ID mapping for control.
 type LightMap struct {
-	// V1 ist die CLIP-v1-Lampenliste (key = numerische ID als String).
+	// V1 is the CLIP v1 light list (key = numeric ID as string).
 	V1 map[string]any
-	// V1ToUUID bildet die numerische v1-ID auf die v2-Ressourcen-UUID ab.
+	// V1ToUUID maps the numeric v1 ID to the v2 resource UUID.
 	V1ToUUID map[string]string
 }
 
-// LightsV1 übersetzt die v2-Lampen in die v1-Struktur. Die Bridge Pro liefert
-// (CLIP v2) keine verlässlichen id_v1 mehr; daher vergeben wir stabile numerische
-// IDs anhand der nach UUID sortierten Reihenfolge.
+// LightsV1 translates the v2 lights into the v1 structure. The Bridge Pro no longer
+// provides reliable id_v1 values (CLIP v2); therefore we assign stable numeric
+// IDs based on the UUID-sorted order.
 func LightsV1(lights []bridgepro.Light) LightMap {
 	v1 := make(map[string]any, len(lights))
 	rev := make(map[string]string, len(lights))
@@ -31,7 +31,7 @@ func LightsV1(lights []bridgepro.Light) LightMap {
 	return LightMap{V1: v1, V1ToUUID: rev}
 }
 
-// lightV1 baut ein einzelnes v1-Light-Objekt aus einer v2-Lampe.
+// lightV1 builds a single v1 light object from a v2 light.
 func lightV1(l bridgepro.Light) map[string]any {
 	state := map[string]any{
 		"on":        l.On.On,
@@ -39,7 +39,7 @@ func lightV1(l bridgepro.Light) map[string]any {
 		"alert":     "none",
 		"reachable": true,
 	}
-	// Farb-/Weiss-Modus: v2 nutzt xy bzw. mirek.
+	// Color/white mode: v2 uses xy or mirek.
 	if l.Color.XY.X != 0 || l.Color.XY.Y != 0 {
 		state["xy"] = []float64{l.Color.XY.X, l.Color.XY.Y}
 		state["colormode"] = "xy"
@@ -66,7 +66,7 @@ func lightV1(l bridgepro.Light) map[string]any {
 	}
 }
 
-// briFromPercent wandelt die v2-Helligkeit (0..100 %) in v1-bri (1..254).
+// briFromPercent converts the v2 brightness (0..100 %) into v1 bri (1..254).
 func briFromPercent(pct float64) int {
 	if pct <= 0 {
 		return 1

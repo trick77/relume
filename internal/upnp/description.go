@@ -1,6 +1,6 @@
-// Package upnp rendert das /description.xml, das der TV nach der SSDP-Discovery
-// abruft und auf modelName/modelNumber prüft, um die Bridge als Gen-2-Hue-Bridge
-// zu erkennen.
+// Package upnp renders the /description.xml that the TV fetches after SSDP
+// discovery and checks for modelName/modelNumber in order to recognize the
+// bridge as a Gen-2 Hue bridge.
 package upnp
 
 import (
@@ -10,8 +10,8 @@ import (
 	"github.com/trick77/relume/internal/config"
 )
 
-// modelName/modelNumber sind exakt die Werte einer Philips Hue Bridge 2015 (BSB002);
-// der TV erkennt nur diese als kompatibel.
+// modelName/modelNumber are exactly the values of a Philips Hue Bridge 2015 (BSB002);
+// the TV only recognizes these as compatible.
 const tmplText = `<?xml version="1.0" encoding="UTF-8" ?>
 <root xmlns="urn:schemas-upnp-org:device-1-0">
 <specVersion>
@@ -37,7 +37,7 @@ const tmplText = `<?xml version="1.0" encoding="UTF-8" ?>
 
 var tmpl = template.Must(template.New("description").Parse(tmplText))
 
-// Render erzeugt das description.xml für die gegebene Identität und Adresse.
+// Render generates the description.xml for the given identity and address.
 func Render(id config.Identity, ip string, port int) (string, error) {
 	var sb strings.Builder
 	err := tmpl.Execute(&sb, struct {

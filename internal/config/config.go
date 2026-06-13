@@ -1,6 +1,6 @@
-// Package config hält den persistenten Zustand von relume: die stabile
-// Fake-Bridge-Identität (gegenüber dem TV), die vom TV vergebenen Pairing-Tokens
-// und die Kopplungsdaten zur echten Hue Bridge Pro.
+// Package config holds the persistent state of relume: the stable
+// fake bridge identity (towards the TV), the pairing tokens issued by the TV
+// and the pairing data for the real Hue Bridge Pro.
 package config
 
 import (
@@ -14,16 +14,16 @@ import (
 	"sync"
 )
 
-// Identity ist die stabile Identität, mit der sich relume gegenüber dem TV
-// als Gen-2-Bridge (BSB002) ausgibt. Sie wird einmalig erzeugt und persistiert,
-// da der TV Bridge-Identitäten cached.
+// Identity is the stable identity with which relume presents itself to the TV
+// as a Gen 2 bridge (BSB002). It is generated once and persisted,
+// because the TV caches bridge identities.
 type Identity struct {
-	// Serial ist die 12-stellige Hex-MAC ohne Trenner, lowercase (z.B. "2c4d54ea2832").
-	// Entspricht serialNumber in description.xml und dem UUID-Suffix.
+	// Serial is the 12-digit hex MAC without separators, lowercase (e.g. "2c4d54ea2832").
+	// Corresponds to serialNumber in description.xml and the UUID suffix.
 	Serial string `json:"serial"`
 }
 
-// MAC liefert die Serial im Doppelpunkt-Format (z.B. "2c:4d:54:ea:28:32").
+// MAC returns the serial in colon format (e.g. "2c:4d:54:ea:28:32").
 func (i Identity) MAC() string {
 	s := i.Serial
 	var parts []string
@@ -33,40 +33,40 @@ func (i Identity) MAC() string {
 	return strings.Join(parts, ":")
 }
 
-// BridgeID ist die 16-stellige bridgeid (mac[:6] + FFFE + mac[6:], uppercase),
-// wie sie der TV in /config und im hue-bridgeid SSDP-Header erwartet.
+// BridgeID is the 16-digit bridgeid (mac[:6] + FFFE + mac[6:], uppercase),
+// as the TV expects it in /config and in the hue-bridgeid SSDP header.
 func (i Identity) BridgeID() string {
 	s := i.Serial
 	return strings.ToUpper(s[:6] + "fffe" + s[6:])
 }
 
-// UUID ist die UPnP-UUID; muss in SSDP-USN und description.xml UDN identisch sein.
+// UUID is the UPnP UUID; must be identical in the SSDP USN and the description.xml UDN.
 func (i Identity) UUID() string {
 	return "2f402f80-da50-11e1-9b23-" + i.Serial
 }
 
-// ApiUser ist ein vom TV gekoppelter Client.
+// ApiUser is a client paired by the TV.
 type ApiUser struct {
 	Username   string `json:"username"`
 	DeviceType string `json:"deviceType"`
-	// ClientKey ist der DTLS-PSK für den Entertainment-Pfad (nur bei generateclientkey).
+	// ClientKey is the DTLS PSK for the entertainment path (only with generateclientkey).
 	ClientKey string `json:"clientKey,omitempty"`
 }
 
-// BridgePro hält die Kopplungsdaten zur echten Hue Bridge Pro.
+// BridgePro holds the pairing data for the real Hue Bridge Pro.
 type BridgePro struct {
 	Host string `json:"host"`
-	// AppKey ist der Application-Key (CLIP-v2 hue-application-key).
+	// AppKey is the application key (CLIP v2 hue-application-key).
 	AppKey string `json:"appKey"`
-	// ClientKey ist der DTLS-PSK für den Entertainment-Client zur Pro.
+	// ClientKey is the DTLS PSK for the entertainment client to the Pro.
 	ClientKey string `json:"clientKey"`
-	// CertSHA256 ist der gepinnte SHA-256-Fingerprint des Pro-Leaf-Zertifikats (hex).
+	// CertSHA256 is the pinned SHA-256 fingerprint of the Pro leaf certificate (hex).
 	CertSHA256 string `json:"certSha256,omitempty"`
-	// SkipTLSVerify deaktiviert die TLS-Prüfung (Fallback statt Pinning).
+	// SkipTLSVerify disables TLS verification (fallback instead of pinning).
 	SkipTLSVerify bool `json:"skipTlsVerify"`
 }
 
-// Config ist der gesamte persistente Zustand.
+// Config is the entire persistent state.
 type Config struct {
 	Identity Identity            `json:"identity"`
 	ApiUsers map[string]*ApiUser `json:"apiUsers"`
@@ -76,8 +76,8 @@ type Config struct {
 	path string     `json:"-"`
 }
 
-// Load liest die Config von path. Existiert sie nicht, wird eine neue mit frisch
-// erzeugter Identität angelegt und sofort persistiert.
+// Load reads the config from path. If it does not exist, a new one with a freshly
+// generated identity is created and immediately persisted.
 func Load(path string) (*Config, error) {
 	c := &Config{path: path, ApiUsers: map[string]*ApiUser{}}
 
@@ -94,11 +94,11 @@ func Load(path string) (*Config, error) {
 		}
 		return c, nil
 	case err != nil:
-		return nil, fmt.Errorf("config lesen: %w", err)
+		return nil, fmt.Errorf("read config: %w", err)
 	}
 
 	if err := json.Unmarshal(data, c); err != nil {
-		return nil, fmt.Errorf("config parsen: %w", err)
+		return nil, fmt.Errorf("parse config: %w", err)
 	}
 	if c.ApiUsers == nil {
 		c.ApiUsers = map[string]*ApiUser{}
@@ -107,7 +107,7 @@ func Load(path string) (*Config, error) {
 	return c, nil
 }
 
-// AddApiUser legt einen neuen gekoppelten TV-Client an und persistiert.
+// AddApiUser creates a new paired TV client and persists it.
 func (c *Config) AddApiUser(u *ApiUser) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -115,7 +115,7 @@ func (c *Config) AddApiUser(u *ApiUser) error {
 	return c.save()
 }
 
-// HasApiUser prüft, ob ein Username bekannt (gekoppelt) ist.
+// HasApiUser checks whether a username is known (paired).
 func (c *Config) HasApiUser(username string) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -123,7 +123,7 @@ func (c *Config) HasApiUser(username string) bool {
 	return ok
 }
 
-// SetPro speichert die Bridge-Pro-Kopplungsdaten und persistiert.
+// SetPro stores the Bridge Pro pairing data and persists it.
 func (c *Config) SetPro(p *BridgePro) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -131,14 +131,14 @@ func (c *Config) SetPro(p *BridgePro) error {
 	return c.save()
 }
 
-// save schreibt die Config atomar nach c.path. Caller hält ggf. den Lock.
+// save writes the config atomically to c.path. The caller may hold the lock.
 func (c *Config) save() error {
 	if c.path == "" {
 		return nil
 	}
 	data, err := json.MarshalIndent(c, "", "  ")
 	if err != nil {
-		return fmt.Errorf("config serialisieren: %w", err)
+		return fmt.Errorf("serialize config: %w", err)
 	}
 	if err := os.MkdirAll(filepath.Dir(c.path), 0o755); err != nil {
 		return err
@@ -150,11 +150,11 @@ func (c *Config) save() error {
 	return os.Rename(tmp, c.path)
 }
 
-// generateSerial erzeugt eine zufällige 12-stellige Hex-Serial (6 Bytes).
+// generateSerial generates a random 12-digit hex serial (6 bytes).
 func generateSerial() (string, error) {
 	b := make([]byte, 6)
 	if _, err := rand.Read(b); err != nil {
-		return "", fmt.Errorf("serial erzeugen: %w", err)
+		return "", fmt.Errorf("generate serial: %w", err)
 	}
 	return hex.EncodeToString(b), nil
 }

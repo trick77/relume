@@ -1,11 +1,11 @@
 package translate
 
-// StateV1ToV2 übersetzt einen CLIP-v1-Light-State (wie ihn der TV per PUT schickt)
-// in einen CLIP-v2-PUT-Body für /clip/v2/resource/light/{id}.
+// StateV1ToV2 translates a CLIP v1 light state (as the TV sends it via PUT)
+// into a CLIP v2 PUT body for /clip/v2/resource/light/{id}.
 //
-// Unterstützte v1-Felder: on, bri (1..254), xy ([x,y]), ct (mirek), hue/sat
-// werden bewusst ignoriert — der Ambilight-TV nutzt im REST-Pfad praktisch immer
-// xy oder on/bri. transitiontime (in 100ms-Einheiten) wird zu dynamics.duration (ms).
+// Supported v1 fields: on, bri (1..254), xy ([x,y]), ct (mirek); hue/sat
+// are deliberately ignored — the Ambilight TV practically always uses
+// xy or on/bri in the REST path. transitiontime (in 100ms units) becomes dynamics.duration (ms).
 func StateV1ToV2(v1 map[string]any) map[string]any {
 	out := map[string]any{}
 
@@ -29,7 +29,7 @@ func StateV1ToV2(v1 map[string]any) map[string]any {
 	return out
 }
 
-// briToPercent wandelt v1-bri (1..254) in v2-Helligkeit (0..100 %).
+// briToPercent converts v1 bri (1..254) into v2 brightness (0..100 %).
 func briToPercent(bri float64) float64 {
 	if bri <= 1 {
 		return 0

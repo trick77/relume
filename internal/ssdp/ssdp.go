@@ -1,7 +1,7 @@
-// Package ssdp implementiert den SSDP/UPnP-Responder, mit dem sich relume
-// gegenüber dem TV als Gen-2-Hue-Bridge zu erkennen gibt. Es lauscht auf dem
-// Multicast 239.255.255.250:1900, beantwortet M-SEARCH-Queries sofort und sendet
-// periodische NOTIFY ssdp:alive-Broadcasts.
+// Package ssdp implements the SSDP/UPnP responder that lets relume present
+// itself to the TV as a Gen-2 Hue bridge. It listens on the multicast
+// 239.255.255.250:1900, answers M-SEARCH queries immediately and sends
+// periodic NOTIFY ssdp:alive broadcasts.
 package ssdp
 
 import (
@@ -17,40 +17,40 @@ import (
 
 const (
 	multicastAddr = "239.255.255.250:1900"
-	// server ist der exakte SERVER-Header einer echten Hue-Bridge (verifiziert via diyHue).
+	// server is the exact SERVER header of a real Hue bridge (verified via diyHue).
 	server      = "Linux/3.14.0 UPnP/1.0 IpBridge/1.20.0"
 	notifyEvery = 60 * time.Second
 )
 
-// Responder beantwortet SSDP-Anfragen für eine Bridge-Identität.
+// Responder answers SSDP requests for a bridge identity.
 type Responder struct {
 	id       config.Identity
-	advIP    string // beworbene IP im LOCATION-Header
+	advIP    string // advertised IP in the LOCATION header
 	httpPort int
 	log      *slog.Logger
-	// Debug aktiviert das Mitloggen aller empfangenen SSDP-Datagramme inkl. Header
-	// (zum Analysieren, ob/wie ein TV per SSDP sucht).
+	// Debug enables logging of all received SSDP datagrams including headers
+	// (to analyze whether/how a TV searches via SSDP).
 	Debug bool
 }
 
-// New erstellt einen Responder. advIP ist die IP, die im LOCATION-Header beworben
-// wird (die Adresse des HTTP-Servers von relume).
+// New creates a Responder. advIP is the IP advertised in the LOCATION header
+// (the address of relume's HTTP server).
 func New(id config.Identity, advIP string, httpPort int, log *slog.Logger) *Responder {
 	return &Responder{id: id, advIP: advIP, httpPort: httpPort, log: log}
 }
 
-// Run startet Listener und periodische NOTIFYs und blockiert bis ctx beendet wird.
+// Run starts the listener and periodic NOTIFYs and blocks until ctx is cancelled.
 func (r *Responder) Run(ctx context.Context) error {
 	group := &net.UDPAddr{IP: net.ParseIP("239.255.255.250"), Port: 1900}
 
-	// Auf Multi-NIC-Hosts gezielt an dem Interface lauschen, das die beworbene IP
-	// trägt — sonst hört Go nur am System-Default-Interface, das nicht zwingend im
-	// Netz des TVs liegt.
+	// On multi-NIC hosts, listen specifically on the interface that carries the
+	// advertised IP — otherwise Go only listens on the system default interface,
+	// which is not necessarily on the TV's network.
 	iface, err := interfaceForIP(r.advIP)
 	if err != nil {
-		r.log.Warn("ssdp: interface zur advertise-ip nicht gefunden, nutze default", "advIP", r.advIP, "err", err)
+		r.log.Warn("ssdp: interface for advertise IP not found, using default", "advIP", r.advIP, "err", err)
 	} else {
-		r.log.Info("ssdp: multicast-interface gewählt", "iface", iface.Name, "advIP", r.advIP)
+		r.log.Info("ssdp: multicast interface selected", "iface", iface.Name, "advIP", r.advIP)
 	}
 
 	conn, err := net.ListenMulticastUDP("udp4", iface, group)
@@ -62,7 +62,7 @@ func (r *Responder) Run(ctx context.Context) error {
 
 	go r.notifyLoop(ctx, conn, group)
 
-	r.log.Info("ssdp responder gestartet", "advertise", r.advIP, "httpPort", r.httpPort)
+	r.log.Info("ssdp responder started", "advertise", r.advIP, "httpPort", r.httpPort)
 
 	buf := make([]byte, 2048)
 	for {
@@ -84,10 +84,10 @@ func (r *Responder) Run(ctx context.Context) error {
 	}
 }
 
-// logDatagram protokolliert ein empfangenes SSDP-Datagramm mit den für die
-// Geräteerkennung interessanten Headern. So lässt sich nachvollziehen, ob ein TV
-// per SSDP sucht (M-SEARCH) oder sich nur ankündigt (NOTIFY), und um welches Gerät
-// es sich handelt (SERVER/USER-AGENT).
+// logDatagram logs a received SSDP datagram with the headers relevant for
+// device detection. This makes it possible to tell whether a TV is searching
+// via SSDP (M-SEARCH) or only announcing itself (NOTIFY), and which device it
+// is (SERVER/USER-AGENT).
 func (r *Responder) logDatagram(src *net.UDPAddr, msg string) {
 	firstLine := msg
 	if i := strings.IndexByte(firstLine, '\r'); i >= 0 {
@@ -107,7 +107,7 @@ func (r *Responder) logDatagram(src *net.UDPAddr, msg string) {
 	)
 }
 
-// parseHeaders zerlegt einen SSDP/HTTP-Nachrichtenkopf in Header (Keys uppercase).
+// parseHeaders splits an SSDP/HTTP message header into headers (keys uppercase).
 func parseHeaders(msg string) map[string]string {
 	out := map[string]string{}
 	for _, line := range strings.Split(msg, "\r\n") {
@@ -121,11 +121,11 @@ func parseHeaders(msg string) map[string]string {
 	return out
 }
 
-// interfaceForIP liefert das Netzwerk-Interface, das die gegebene IP trägt.
+// interfaceForIP returns the network interface that carries the given IP.
 func interfaceForIP(ip string) (*net.Interface, error) {
 	target := net.ParseIP(ip)
 	if target == nil {
-		return nil, fmt.Errorf("ungültige IP %q", ip)
+		return nil, fmt.Errorf("invalid IP %q", ip)
 	}
 	ifaces, err := net.Interfaces()
 	if err != nil {
@@ -145,10 +145,10 @@ func interfaceForIP(ip string) (*net.Interface, error) {
 			}
 		}
 	}
-	return nil, fmt.Errorf("kein multicast-faehiges interface mit IP %s", ip)
+	return nil, fmt.Errorf("no multicast-capable interface with IP %s", ip)
 }
 
-// handle beantwortet M-SEARCH-Queries; alles andere wird ignoriert.
+// handle answers M-SEARCH queries; everything else is ignored.
 func (r *Responder) handle(conn *net.UDPConn, src *net.UDPAddr, data []byte) {
 	msg := string(data)
 	if r.Debug {
@@ -158,11 +158,11 @@ func (r *Responder) handle(conn *net.UDPConn, src *net.UDPAddr, data []byte) {
 		return
 	}
 	if r.Debug {
-		r.log.Info("ssdp: M-SEARCH beantwortet", "to", src.String())
+		r.log.Info("ssdp: M-SEARCH answered", "to", src.String())
 	}
-	// Wir antworten breit (ohne strenges ST-Matching), wie es echte Bridges tun —
-	// der TV filtert per LOCATION/description.xml. Sofortige Antwort ist wichtig,
-	// da der TV ein kurzes Suchfenster hat (diyHue #988).
+	// We answer broadly (without strict ST matching), as real bridges do — the
+	// TV filters by LOCATION/description.xml. An immediate reply is important
+	// because the TV has a short search window (diyHue #988).
 	for _, resp := range r.searchResponses() {
 		if _, err := conn.WriteToUDP([]byte(resp), src); err != nil {
 			r.log.Warn("ssdp respond", "err", err, "to", src.String())
@@ -171,7 +171,7 @@ func (r *Responder) handle(conn *net.UDPConn, src *net.UDPAddr, data []byte) {
 	}
 }
 
-// searchResponses liefert die drei M-SEARCH-200-OK-Antworten (root, uuid, basic).
+// searchResponses returns the three M-SEARCH 200 OK responses (root, uuid, basic).
 func (r *Responder) searchResponses() []string {
 	uuid := r.id.UUID()
 	variants := []struct{ st, usn string }{
@@ -195,7 +195,7 @@ func (r *Responder) searchResponses() []string {
 	return out
 }
 
-// notifyLoop sendet periodisch NOTIFY ssdp:alive an den Multicast.
+// notifyLoop periodically sends NOTIFY ssdp:alive to the multicast.
 func (r *Responder) notifyLoop(ctx context.Context, conn *net.UDPConn, group *net.UDPAddr) {
 	t := time.NewTicker(notifyEvery)
 	defer t.Stop()

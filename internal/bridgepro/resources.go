@@ -4,7 +4,7 @@ import (
 	"sort"
 )
 
-// Light ist die für relume relevante Teilmenge einer CLIP-v2-light-Ressource.
+// Light is the subset of a CLIP v2 light resource that is relevant for relume.
 type Light struct {
 	ID       string `json:"id"`
 	IDv1     string `json:"id_v1"`
@@ -26,7 +26,7 @@ type Light struct {
 	ColorTemperature struct {
 		Mirek int `json:"mirek"`
 	} `json:"color_temperature"`
-	// Owner verweist auf das zugehörige device (für stabile Sortierung/Namen).
+	// Owner references the associated device (for stable sorting/names).
 	Owner struct {
 		RID string `json:"rid"`
 	} `json:"owner"`
@@ -37,7 +37,7 @@ type lightList struct {
 	Data   []Light `json:"data"`
 }
 
-// Lights liest alle Lampen der Bridge Pro, stabil nach ID sortiert.
+// Lights reads all lights of the Bridge Pro, stably sorted by ID.
 func (c *Client) Lights() ([]Light, error) {
 	var ll lightList
 	if err := c.get("/clip/v2/resource/light", &ll); err != nil {
@@ -47,8 +47,8 @@ func (c *Client) Lights() ([]Light, error) {
 	return ll.Data, nil
 }
 
-// EntertainmentConfig ist die für relume relevante Teilmenge einer
-// entertainment_configuration-Ressource.
+// EntertainmentConfig is the subset of an entertainment_configuration resource
+// that is relevant for relume.
 type EntertainmentConfig struct {
 	ID       string `json:"id"`
 	Metadata struct {
@@ -62,7 +62,7 @@ type entConfigList struct {
 	Data   []EntertainmentConfig `json:"data"`
 }
 
-// EntertainmentConfigs liest die Entertainment-Konfigurationen der Bridge Pro.
+// EntertainmentConfigs reads the entertainment configurations of the Bridge Pro.
 func (c *Client) EntertainmentConfigs() ([]EntertainmentConfig, error) {
 	var el entConfigList
 	if err := c.get("/clip/v2/resource/entertainment_configuration", &el); err != nil {

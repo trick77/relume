@@ -55,10 +55,10 @@ func TestPairing_withoutLinkButton_thenFails(t *testing.T) {
 
 	// Then
 	if len(out) != 1 || out[0]["error"] == nil {
-		t.Fatalf("erwartete error-antwort, bekam %v", out)
+		t.Fatalf("expected error response, got %v", out)
 	}
 	if out[0]["error"]["type"].(float64) != 101 {
-		t.Errorf("erwartete typ 101, bekam %v", out[0]["error"]["type"])
+		t.Errorf("expected type 101, got %v", out[0]["error"]["type"])
 	}
 }
 
@@ -75,24 +75,24 @@ func TestPairing_withLinkButton_thenReturnsUsernameAndClientKey(t *testing.T) {
 
 	// Then
 	if len(out) != 1 || out[0]["success"] == nil {
-		t.Fatalf("erwartete success, bekam %v", out)
+		t.Fatalf("expected success, got %v", out)
 	}
 	username, _ := out[0]["success"]["username"].(string)
 	clientkey, _ := out[0]["success"]["clientkey"].(string)
 	if len(username) != 32 {
-		t.Errorf("username länge = %d (%q)", len(username), username)
+		t.Errorf("username length = %d (%q)", len(username), username)
 	}
 	if len(clientkey) != 32 || clientkey != strings.ToUpper(clientkey) {
-		t.Errorf("clientkey ungültig: %q", clientkey)
+		t.Errorf("clientkey invalid: %q", clientkey)
 	}
 
-	// Then: gekoppelter user kann config abrufen
+	// Then: paired user can fetch config
 	cfgResp := mustGet(t, ts.URL+"/api/"+username+"/config")
 	defer cfgResp.Body.Close()
 	var cfg map[string]any
 	json.NewDecoder(cfgResp.Body).Decode(&cfg)
 	if cfg["modelid"] != "BSB002" {
-		t.Errorf("modelid = %v, erwartet BSB002", cfg["modelid"])
+		t.Errorf("modelid = %v, expected BSB002", cfg["modelid"])
 	}
 }
 
@@ -109,7 +109,7 @@ func TestDescriptionXML_containsBSB002(t *testing.T) {
 	xml := string(body)
 	for _, want := range []string{"<modelNumber>BSB002</modelNumber>", "Philips hue bridge 2015", "uuid:2f402f80-da50-11e1-9b23-"} {
 		if !strings.Contains(xml, want) {
-			t.Errorf("description.xml enthält %q nicht:\n%s", want, xml)
+			t.Errorf("description.xml does not contain %q:\n%s", want, xml)
 		}
 	}
 }

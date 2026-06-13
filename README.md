@@ -1,88 +1,90 @@
 # relume
 
-Software-Bridge, die einen **Philips Ambilight-TV** mit einer **Hue Bridge Pro (BSB003)**
-verbindet. relume gibt sich gegenüber dem TV als alte Gen-2-Bridge (BSB002) aus und reicht
-alle Befehle per HTTPS/CLIP-v2 an die echte Bridge Pro weiter.
+A software bridge that connects a **Philips Ambilight TV** to a **Hue Bridge Pro (BSB003)**.
+relume presents itself to the TV as an old gen-2 bridge (BSB002) and proxies every request
+to the real Bridge Pro over HTTPS/CLIP v2.
 
 ```
-Ambilight-TV  ──mDNS/SSDP + HTTP──▶  relume  ──HTTPS/CLIP v2──▶  Hue Bridge Pro  ──Zigbee──▶  Lampen
+Ambilight TV  ──mDNS/SSDP + HTTP──▶  relume  ──HTTPS/CLIP v2──▶  Hue Bridge Pro  ──Zigbee──▶  lights
 ```
 
-Details und Hintergrund: siehe [PLAN.md](PLAN.md) und [AGENTS.md](AGENTS.md).
+Background and design: see [PLAN.md](PLAN.md) and [AGENTS.md](AGENTS.md).
 
-## Voraussetzungen
+## Requirements
 
-- relume muss im **selben L2-Netz** wie der TV laufen (Discovery nutzt Multicast).
-  → Docker zwingend mit `network_mode: host`.
-- Eine erreichbare Hue Bridge Pro im selben Netz.
+- relume must run on the **same L2 network** as the TV (discovery uses multicast).
+  → Docker requires `network_mode: host`.
+- A reachable Hue Bridge Pro on the same network.
 
-## Schnellstart (Docker)
+## Quick start (Docker)
 
 ```bash
-# 1. Mit der echten Bridge Pro koppeln (einmalig). Beim Aufruf den Link-Button
-#    der Bridge Pro KURZ antippen (nicht halten).
+# 1. Pair with the real Bridge Pro (once). When prompted, briefly TAP the link
+#    button on the Bridge Pro (do not hold it).
 docker compose run --rm relume setup -config /data/relume.json
-#    -bridge-ip <ip> falls Cloud-Discovery nichts findet.
+#    add -bridge-ip <ip> if cloud discovery finds nothing.
 
-# 2. Dienst starten
+# 2. Start the service
 docker compose up -d
 
-# 3. Am TV die Ambilight+Hue-Bridge-Suche starten. Wenn der TV nach dem
-#    Link-Button fragt, das Pairing-Fenster öffnen:
-docker compose run --rm relume link        # oder im Browser http://<host-ip>/
+# 3. On the TV, start the Ambilight+Hue bridge search. When the TV asks for the
+#    link button, open the pairing window:
+docker compose run --rm relume link        # or in a browser: http://<host-ip>/
 ```
 
-## Befehle
+The image is pulled from `ghcr.io/trick77/relume` (built by the release workflow).
+To build locally instead: `docker build -f Containerfile -t relume:dev .`
 
-| Befehl | Zweck |
-|--------|-------|
-| `serve` | Dienst (Discovery + Bridge-Emulation). Standard. |
-| `setup` | Mit Bridge Pro koppeln (App-Key holen, Zertifikat pinnen). |
-| `discover` | Bridge Pro per Philips-Cloud im Netz finden. |
-| `link` | Pairing-Fenster (30s) für den TV öffnen. |
-| `avahi-service` | Avahi-Service-Datei ausgeben (siehe mDNS-Caveat). |
+## Commands
 
-Nützliche Flags für `serve`: `-http-port` (Standard 80), `-advertise-ip` (leer =
-auto), `-debug` (SSDP-/HTTP-Diagnose + mDNS-Observer).
+| Command | Purpose |
+|---------|---------|
+| `serve` | Run the service (discovery + bridge emulation). Default. |
+| `setup` | Pair with the Bridge Pro (fetch app key, pin certificate). |
+| `discover` | Find the Bridge Pro via Philips cloud. |
+| `link` | Open the pairing window (30s) for the TV. |
+| `avahi-service` | Emit an Avahi service file (see mDNS caveat). |
+| `version` | Print the version. |
 
-## Wichtige Caveats
+Useful `serve` flags: `-http-port` (default 80), `-advertise-ip` (empty = auto),
+`-debug` (SSDP/HTTP diagnostics + mDNS observer).
 
-### Discovery: der TV nutzt mDNS, nicht SSDP
-Gemessen am realen Philips-TV: Die Hue-Suche läuft **nicht** über SSDP, sondern über
-mDNS (`_hue._tcp`). relume announct das aktiv als `Philips Hue - XXXXXX` / `modelid=BSB002`.
-Die echte Bridge Pro announct sich als `BSB003`; der TV verwirft diese als inkompatibel.
+## Important caveats
 
-**mDNS-Konflikt mit avahi:** Läuft auf dem Host ein `avahi-daemon` (belegt UDP 5353),
-kann relumes eingebauter mDNS-Announcer den Port nicht exklusiv nutzen. Dann stattdessen
-avahi announcen lassen:
+### Discovery: the TV uses mDNS, not SSDP
+Measured against a real Philips TV: the Hue search does **not** use SSDP, it uses
+mDNS (`_hue._tcp`). The TV does not actively query — it **passively listens** for the
+bridge's announcement. relume actively announces `Philips Hue - XXXXXX` / `modelid=BSB002`.
+The real Bridge Pro announces itself as `BSB003`, which the TV rejects as incompatible.
+
+**mDNS conflict with avahi:** if the host runs an `avahi-daemon` (it owns UDP 5353),
+relume's built-in mDNS announcer cannot bind the port. In that case let avahi announce:
 ```bash
 docker compose run --rm relume avahi-service -config /data/relume.json > /etc/avahi/services/relume-hue.service
-# Port an den serve-http-port anpassen: relume avahi-service -http-port 80
+# match the port to the serve http-port: relume avahi-service -http-port 80
 ```
-Alternativ den `avahi-daemon` deaktivieren, dann greift relumes eigener Announcer.
+Alternatively disable `avahi-daemon`, then relume's own announcer works.
 
-### Cloud-Suppression
-Ist eine echte Hue-Bridge bei `discovery.meethue.com` registriert, kann der TV sie per
-Cloud auflösen und **lokale Discovery überspringen** (diyHue #988). Prüfen mit
-`curl https://discovery.meethue.com/` aus dem TV-Netz — liefert das die echte Bridge,
-muss `discovery.meethue.com` per lokalem DNS auf relume umgebogen werden.
+### Cloud suppression
+If a real Hue bridge is registered at `discovery.meethue.com`, the TV may resolve it via
+the cloud and **skip local discovery** (diyHue #988). Check with
+`curl https://discovery.meethue.com/` from the TV's network — if it returns the real bridge,
+redirect `discovery.meethue.com` to relume via local DNS.
 
-### Rootless Docker und Port 80
-Eine echte Bridge spricht Port 80. Bei **rootless** Docker sind Ports <1024 nur mit
-Host-sysctl bindbar:
+### Rootless Docker and port 80
+A real bridge speaks on port 80. Under **rootless** Docker, ports <1024 require a host sysctl:
 ```bash
-sudo sysctl net.ipv4.ip_unprivileged_port_start=80   # NICHT den Container als root laufen lassen
+sudo sysctl net.ipv4.ip_unprivileged_port_start=80   # do NOT run the container as root
 ```
-Alternativ auf einen hohen Port wechseln (`-http-port 8080`) — funktioniert, sofern der
-TV den per mDNS beworbenen Port respektiert (zu verifizieren).
+Alternatively use a high port (`-http-port 8080`) — works as long as the TV honors the
+port advertised via mDNS (to be verified).
 
-## Persistenz / Secrets
+## Persistence / secrets
 
-Der Zustand (Bridge-Identität, TV-Tokens, **Bridge-Pro-App-Key + clientkey**) liegt in
-`./data/relume.json`. Diese Datei enthält Geheimnisse — nicht teilen, nicht committen
-(ist in `.gitignore`).
+State (bridge identity, TV tokens, **Bridge Pro app key + clientkey**) lives in
+`./data/relume.json`. This file holds secrets — do not share or commit it (it is gitignored).
 
-## Build / Test (lokal)
+## Build / test (local)
 
 ```bash
 go build -o relume ./cmd/relume
