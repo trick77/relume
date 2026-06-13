@@ -76,7 +76,7 @@ als HueStream-v2 an die Pro gestreamt. Stream-Stop → deaktivieren.
   realen TV (siehe unten).** Verifizierung der TV-Erkennung steht noch aus (auf Linux-Ziel).
 - **M4 — Entertainment** ⏳ offen. `huestream` (+Tests), DTLS-Server (TV) + DTLS-Client (Pro),
   Entertainment-Config-Aktivierung, Stream-Forwarding. *Ziel:* flüssiges Ambilight.
-- **M5 — Packaging** ✅ **FERTIG.** Dockerfile (statisch, multi-stage), `docker-compose.yml`
+- **M5 — Packaging** ✅ **FERTIG.** Containerfile (statisch, multi-stage), `compose.yaml`
   (`network_mode: host`), Persistenz unter `./data`, README mit Deployment + Caveats.
   Docker-Image baut.
 

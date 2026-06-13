@@ -4,8 +4,10 @@
 # Multicast und müssen direkt im LAN des TVs liegen — Bridge-/NAT-Netze blockieren das.
 services:
   relume:
-    build: .
-    image: relume:latest
+    build:
+      context: .
+      dockerfile: Containerfile
+    image: ghcr.io/trick77/relume:latest
     container_name: relume
     network_mode: host
     restart: unless-stopped
