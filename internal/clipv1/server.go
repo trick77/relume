@@ -113,6 +113,7 @@ func (s *Server) logRequests(next http.Handler) http.Handler {
 				"path", r.URL.Path,
 				"requestURI", r.URL.RequestURI(),
 				"from", r.RemoteAddr,
+				"host", r.Host,
 				"user-agent", r.UserAgent(),
 				"body", string(body),
 			)

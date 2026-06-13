@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"strings"
 	"time"
 
 	"github.com/grandcat/zeroconf"
@@ -33,6 +34,10 @@ type Announcer struct {
 	advIP string
 	port  int
 	log   *slog.Logger
+	// IdentityProfile selects experimental wire-identity compatibility tweaks.
+	// Empty keeps the default; "ambilight" matches the Ambilight-specific
+	// OSS emulator.
+	IdentityProfile string
 	// BurstDuration enables a diagnostic re-announcement burst after startup.
 	// Defaults to disabled.
 	BurstDuration time.Duration
@@ -131,13 +136,17 @@ func (a *Announcer) Run(ctx context.Context) error {
 
 func (a *Announcer) serviceSpec() serviceSpec {
 	bridgeID := a.id.BridgeID()
+	host := a.id.Serial
+	if a.IdentityProfile == "ambilight" {
+		host = strings.ToLower(bridgeID)
+	}
 	return serviceSpec{
 		instance: "Philips Hue - " + bridgeID[len(bridgeID)-6:],
 		service:  service,
 		domain:   domain,
 		// Unique, bridge-like hostname for the SRV target / A record so it never
 		// collides with the host's own mDNS name (e.g. nas.local).
-		host: a.id.Serial,
+		host: host,
 		txt: []string{
 			"bridgeid=" + bridgeID,
 			"modelid=BSB002",

@@ -148,6 +148,7 @@ func runServe(args []string, log *slog.Logger) error {
 	responder.IdentityProfile = opts.identityProfile
 	responder.MediaServerAlias = opts.ssdpMediaServerAlias
 	announcer := mdns.New(cfg.Identity, ip, opts.httpPort, log)
+	announcer.IdentityProfile = opts.identityProfile
 	announcer.BurstDuration = opts.discoveryBurstDuration
 	announcer.BurstInterval = opts.discoveryBurstInterval
 
