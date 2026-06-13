@@ -136,6 +136,34 @@ func TestDescriptionXML_withHassProfileContainsHomeAssistantManufacturerFields(t
 	}
 }
 
+func TestDescriptionXML_withMediaServerAliasContainsMediaServerDeviceType(t *testing.T) {
+	// Given
+	s, ts := newTestServer(t)
+	s.IdentityProfile = "hass"
+	s.MediaServerAlias = true
+
+	// When
+	resp := mustGet(t, ts.URL+"/description.xml")
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+
+	// Then
+	xml := string(body)
+	for _, want := range []string{
+		"<deviceType>urn:schemas-upnp-org:device:MediaServer:1</deviceType>",
+		"<manufacturer>Royal Philips Electronics</manufacturer>",
+		"<modelName>Philips hue bridge 2015</modelName>",
+		"<modelNumber>BSB002</modelNumber>",
+	} {
+		if !strings.Contains(xml, want) {
+			t.Errorf("description.xml does not contain %q:\n%s", want, xml)
+		}
+	}
+	if strings.Contains(xml, "<deviceType>urn:schemas-upnp-org:device:Basic:1</deviceType>") {
+		t.Errorf("description.xml still contains Basic deviceType:\n%s", xml)
+	}
+}
+
 func TestShortConfig_unauthenticated(t *testing.T) {
 	// Given
 	_, ts := newTestServer(t)

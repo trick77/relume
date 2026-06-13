@@ -133,6 +133,7 @@ func runServe(args []string, log *slog.Logger) error {
 	clip := clipv1.New(cfg, ip, opts.httpPort, log)
 	clip.Debug = opts.debug
 	clip.IdentityProfile = opts.identityProfile
+	clip.MediaServerAlias = opts.ssdpMediaServerAlias
 	if cfg.Pro != nil {
 		client := bridgepro.New(cfg.Pro)
 		clip.SetLightProvider(bridge.NewLightProvider(client))

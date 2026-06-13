@@ -47,6 +47,8 @@ type Server struct {
 	// IdentityProfile selects experimental wire-identity compatibility tweaks.
 	// Empty keeps the default; "hass" matches Home Assistant emulated-hue.
 	IdentityProfile string
+	// MediaServerAlias makes /description.xml match the opt-in SSDP MediaServer:1 alias.
+	MediaServerAlias bool
 
 	mu       sync.Mutex
 	lastLink time.Time
@@ -123,7 +125,10 @@ func (s *Server) linkActive() bool {
 }
 
 func (s *Server) handleDescription(w http.ResponseWriter, _ *http.Request) {
-	xml, err := upnp.RenderWithProfile(s.cfg.Identity, s.advIP, s.httpPort, s.IdentityProfile)
+	xml, err := upnp.RenderWithOptions(s.cfg.Identity, s.advIP, s.httpPort, upnp.Options{
+		Profile:          s.IdentityProfile,
+		MediaServerAlias: s.MediaServerAlias,
+	})
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return

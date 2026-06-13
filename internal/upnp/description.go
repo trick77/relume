@@ -15,6 +15,12 @@ type profileFields struct {
 	ManufacturerURL string
 }
 
+// Options selects experimental compatibility tweaks for description.xml.
+type Options struct {
+	Profile          string
+	MediaServerAlias bool
+}
+
 func fieldsForProfile(profile string) profileFields {
 	if profile == "hass" {
 		return profileFields{
@@ -38,7 +44,7 @@ const tmplText = `<?xml version="1.0" encoding="UTF-8" ?>
 </specVersion>
 <URLBase>http://{{.IP}}:{{.Port}}/</URLBase>
 <device>
-<deviceType>urn:schemas-upnp-org:device:Basic:1</deviceType>
+<deviceType>{{.DeviceType}}</deviceType>
 <friendlyName>Philips hue ({{.IP}})</friendlyName>
 <manufacturer>{{.Manufacturer}}</manufacturer>
 <manufacturerURL>{{.ManufacturerURL}}</manufacturerURL>
@@ -64,11 +70,21 @@ func Render(id config.Identity, ip string, port int) (string, error) {
 // profile keeps relume's default bridge identity; "hass" matches Home Assistant
 // emulated-hue fields that public Philips TV reports have accepted.
 func RenderWithProfile(id config.Identity, ip string, port int, profile string) (string, error) {
+	return RenderWithOptions(id, ip, port, Options{Profile: profile})
+}
+
+// RenderWithOptions generates description.xml with optional compatibility tweaks.
+func RenderWithOptions(id config.Identity, ip string, port int, opts Options) (string, error) {
 	var sb strings.Builder
-	fields := fieldsForProfile(profile)
+	fields := fieldsForProfile(opts.Profile)
+	deviceType := "urn:schemas-upnp-org:device:Basic:1"
+	if opts.MediaServerAlias {
+		deviceType = "urn:schemas-upnp-org:device:MediaServer:1"
+	}
 	err := tmpl.Execute(&sb, struct {
 		IP              string
 		Port            int
+		DeviceType      string
 		Serial          string
 		UUID            string
 		Manufacturer    string
@@ -76,6 +92,7 @@ func RenderWithProfile(id config.Identity, ip string, port int, profile string) 
 	}{
 		IP:              ip,
 		Port:            port,
+		DeviceType:      deviceType,
 		Serial:          id.Serial,
 		UUID:            id.UUID(),
 		Manufacturer:    fields.Manufacturer,
