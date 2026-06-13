@@ -136,7 +136,7 @@ func TestDescriptionXML_withHassProfileContainsHomeAssistantManufacturerFields(t
 	}
 }
 
-func TestDescriptionXML_withMediaServerAliasContainsMediaServerDeviceType(t *testing.T) {
+func TestDescriptionXML_withMediaServerAliasKeepsDefaultDeviceTypeForPlainPath(t *testing.T) {
 	// Given
 	s, ts := newTestServer(t)
 	s.IdentityProfile = "hass"
@@ -144,6 +144,34 @@ func TestDescriptionXML_withMediaServerAliasContainsMediaServerDeviceType(t *tes
 
 	// When
 	resp := mustGet(t, ts.URL+"/description.xml")
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+
+	// Then
+	xml := string(body)
+	for _, want := range []string{
+		"<deviceType>urn:schemas-upnp-org:device:Basic:1</deviceType>",
+		"<manufacturer>Royal Philips Electronics</manufacturer>",
+		"<modelName>Philips hue bridge 2015</modelName>",
+		"<modelNumber>BSB002</modelNumber>",
+	} {
+		if !strings.Contains(xml, want) {
+			t.Errorf("description.xml does not contain %q:\n%s", want, xml)
+		}
+	}
+	if strings.Contains(xml, "<deviceType>urn:schemas-upnp-org:device:MediaServer:1</deviceType>") {
+		t.Errorf("plain description.xml contains MediaServer deviceType:\n%s", xml)
+	}
+}
+
+func TestDescriptionXML_withMediaServerAliasContainsMediaServerDeviceTypeForAliasQuery(t *testing.T) {
+	// Given
+	s, ts := newTestServer(t)
+	s.IdentityProfile = "hass"
+	s.MediaServerAlias = true
+
+	// When
+	resp := mustGet(t, ts.URL+"/description.xml?relume=ms1")
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(resp.Body)
 
@@ -160,7 +188,7 @@ func TestDescriptionXML_withMediaServerAliasContainsMediaServerDeviceType(t *tes
 		}
 	}
 	if strings.Contains(xml, "<deviceType>urn:schemas-upnp-org:device:Basic:1</deviceType>") {
-		t.Errorf("description.xml still contains Basic deviceType:\n%s", xml)
+		t.Errorf("alias description.xml still contains Basic deviceType:\n%s", xml)
 	}
 }
 

@@ -124,10 +124,10 @@ func (s *Server) linkActive() bool {
 	return time.Since(s.lastLink) <= linkWindow
 }
 
-func (s *Server) handleDescription(w http.ResponseWriter, _ *http.Request) {
+func (s *Server) handleDescription(w http.ResponseWriter, r *http.Request) {
 	xml, err := upnp.RenderWithOptions(s.cfg.Identity, s.advIP, s.httpPort, upnp.Options{
 		Profile:          s.IdentityProfile,
-		MediaServerAlias: s.MediaServerAlias,
+		MediaServerAlias: s.MediaServerAlias && r.URL.Query().Get("relume") == "ms1",
 	})
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
