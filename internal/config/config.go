@@ -1,4 +1,4 @@
-// Package config hält den persistenten Zustand von ambibridge: die stabile
+// Package config hält den persistenten Zustand von relume: die stabile
 // Fake-Bridge-Identität (gegenüber dem TV), die vom TV vergebenen Pairing-Tokens
 // und die Kopplungsdaten zur echten Hue Bridge Pro.
 package config
@@ -14,7 +14,7 @@ import (
 	"sync"
 )
 
-// Identity ist die stabile Identität, mit der sich ambibridge gegenüber dem TV
+// Identity ist die stabile Identität, mit der sich relume gegenüber dem TV
 // als Gen-2-Bridge (BSB002) ausgibt. Sie wird einmalig erzeugt und persistiert,
 // da der TV Bridge-Identitäten cached.
 type Identity struct {

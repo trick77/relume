@@ -1,4 +1,4 @@
-// Command ambibridge ist eine Software-Bridge, die einen Philips Ambilight-TV mit
+// Command relume ist eine Software-Bridge, die einen Philips Ambilight-TV mit
 // einer Hue Bridge Pro verbindet, indem sie sich gegenüber dem TV als Gen-2-Bridge
 // ausgibt und Befehle an die Pro weiterreicht.
 package main
@@ -15,12 +15,13 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/trick77/ambibridge/internal/bridge"
-	"github.com/trick77/ambibridge/internal/bridgepro"
-	"github.com/trick77/ambibridge/internal/clipv1"
-	"github.com/trick77/ambibridge/internal/config"
-	"github.com/trick77/ambibridge/internal/diag"
-	"github.com/trick77/ambibridge/internal/ssdp"
+	"github.com/trick77/relume/internal/bridge"
+	"github.com/trick77/relume/internal/bridgepro"
+	"github.com/trick77/relume/internal/clipv1"
+	"github.com/trick77/relume/internal/config"
+	"github.com/trick77/relume/internal/diag"
+	"github.com/trick77/relume/internal/mdns"
+	"github.com/trick77/relume/internal/ssdp"
 )
 
 func main() {
@@ -60,7 +61,7 @@ func main() {
 
 func runServe(args []string, log *slog.Logger) error {
 	fs := flag.NewFlagSet("serve", flag.ExitOnError)
-	cfgPath := fs.String("config", "ambibridge.json", "Pfad zur Konfigurationsdatei")
+	cfgPath := fs.String("config", "relume.json", "Pfad zur Konfigurationsdatei")
 	httpPort := fs.Int("http-port", 80, "HTTP-Port der emulierten Bridge")
 	advIP := fs.String("advertise-ip", "", "beworbene IP (leer = auto-detektieren)")
 	debug := fs.Bool("debug", false, "ausführliche Diagnose: SSDP-/HTTP-Datagramme + mDNS-Observer")
@@ -87,13 +88,20 @@ func runServe(args []string, log *slog.Logger) error {
 		clip.SetLightProvider(bridge.NewLightProvider(client))
 		log.Info("bridge pro gekoppelt", "host", cfg.Pro.Host)
 	} else {
-		log.Warn("keine bridge pro gekoppelt – erst 'ambibridge setup' ausführen")
+		log.Warn("keine bridge pro gekoppelt – erst 'relume setup' ausführen")
 	}
 	responder := ssdp.New(cfg.Identity, ip, *httpPort, log)
 	responder.Debug = *debug
+	announcer := mdns.New(cfg.Identity, ip, *httpPort, log)
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+
+	go func() {
+		if err := announcer.Run(ctx); err != nil && ctx.Err() == nil {
+			log.Warn("mdns-announcer", "err", err)
+		}
+	}()
 
 	if *debug {
 		obs := diag.NewMDNSObserver(ip, log)
@@ -144,7 +152,7 @@ func shutdownHTTP(srv *http.Server) {
 // runLink öffnet das Pairing-Fenster, indem es den laufenden serve-Prozess anstößt.
 func runLink(args []string) error {
 	fs := flag.NewFlagSet("link", flag.ExitOnError)
-	host := fs.String("host", "127.0.0.1", "Host des laufenden ambibridge")
+	host := fs.String("host", "127.0.0.1", "Host des laufenden relume")
 	port := fs.Int("http-port", 80, "HTTP-Port")
 	_ = fs.Parse(args)
 
@@ -178,11 +186,11 @@ func runDiscover() error {
 	return nil
 }
 
-// runSetup koppelt ambibridge mit der echten Hue Bridge Pro: Zertifikat pinnen,
+// runSetup koppelt relume mit der echten Hue Bridge Pro: Zertifikat pinnen,
 // Link-Button abwarten, App-Key + clientkey holen und persistieren.
 func runSetup(args []string, log *slog.Logger) error {
 	fs := flag.NewFlagSet("setup", flag.ExitOnError)
-	cfgPath := fs.String("config", "ambibridge.json", "Pfad zur Konfigurationsdatei")
+	cfgPath := fs.String("config", "relume.json", "Pfad zur Konfigurationsdatei")
 	bridgeIP := fs.String("bridge-ip", "", "IP der Hue Bridge Pro (leer = Cloud-Discovery)")
 	skipTLS := fs.Bool("skip-tls-verify", false, "TLS-Prüfung gegen die Pro deaktivieren (statt Cert-Pinning)")
 	timeout := fs.Duration("timeout", 60*time.Second, "wie lange auf den Link-Button gewartet wird")
@@ -219,7 +227,7 @@ func runSetup(args []string, log *slog.Logger) error {
 	deadline := time.Now().Add(*timeout)
 	var res *bridgepro.PairResult
 	for time.Now().Before(deadline) {
-		res, err = bridgepro.Pair(httpClient, host, "ambibridge#"+hostname())
+		res, err = bridgepro.Pair(httpClient, host, "relume#"+hostname())
 		if err == nil {
 			break
 		}

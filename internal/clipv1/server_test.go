@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/trick77/ambibridge/internal/config"
+	"github.com/trick77/relume/internal/config"
 )
 
 func mustGet(t *testing.T, url string) *http.Response {

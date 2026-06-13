@@ -1,4 +1,4 @@
-// Package ssdp implementiert den SSDP/UPnP-Responder, mit dem sich ambibridge
+// Package ssdp implementiert den SSDP/UPnP-Responder, mit dem sich relume
 // gegenüber dem TV als Gen-2-Hue-Bridge zu erkennen gibt. Es lauscht auf dem
 // Multicast 239.255.255.250:1900, beantwortet M-SEARCH-Queries sofort und sendet
 // periodische NOTIFY ssdp:alive-Broadcasts.
@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/trick77/ambibridge/internal/config"
+	"github.com/trick77/relume/internal/config"
 )
 
 const (
@@ -34,7 +34,7 @@ type Responder struct {
 }
 
 // New erstellt einen Responder. advIP ist die IP, die im LOCATION-Header beworben
-// wird (die Adresse des HTTP-Servers von ambibridge).
+// wird (die Adresse des HTTP-Servers von relume).
 func New(id config.Identity, advIP string, httpPort int, log *slog.Logger) *Responder {
 	return &Responder{id: id, advIP: advIP, httpPort: httpPort, log: log}
 }

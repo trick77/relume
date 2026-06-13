@@ -16,7 +16,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/trick77/ambibridge/internal/config"
+	"github.com/trick77/relume/internal/config"
 )
 
 const appKeyHeader = "hue-application-key"

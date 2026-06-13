@@ -3,7 +3,7 @@ package translate
 import (
 	"testing"
 
-	"github.com/trick77/ambibridge/internal/bridgepro"
+	"github.com/trick77/relume/internal/bridgepro"
 )
 
 func TestLightsV1_mapsAndAssignsStableIDs(t *testing.T) {

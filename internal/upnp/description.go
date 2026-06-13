@@ -7,7 +7,7 @@ import (
 	"strings"
 	"text/template"
 
-	"github.com/trick77/ambibridge/internal/config"
+	"github.com/trick77/relume/internal/config"
 )
 
 // modelName/modelNumber sind exakt die Werte einer Philips Hue Bridge 2015 (BSB002);

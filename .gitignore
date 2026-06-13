@@ -1,10 +1,10 @@
 # Binaries
-/ambibridge
-/cmd/ambibridge/ambibridge
+/relume
+/cmd/relume/relume
 
 # Laufzeit-Zustand
 *.json.tmp
-ambibridge.json
+relume.json
 /data/
 
 # Logs

@@ -16,8 +16,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/trick77/ambibridge/internal/config"
-	"github.com/trick77/ambibridge/internal/upnp"
+	"github.com/trick77/relume/internal/config"
+	"github.com/trick77/relume/internal/upnp"
 )
 
 // linkWindow ist die Dauer, in der nach Drücken des (virtuellen) Link-Buttons ein
@@ -329,9 +329,9 @@ func (s *Server) handleLink(w http.ResponseWriter, _ *http.Request) {
 	io.WriteString(w, fmt.Sprintf("<p>Link-Button gedrückt. Pairing für %s offen.</p><p><a href=\"/\">zurück</a></p>", linkWindow))
 }
 
-const indexHTML = `<!doctype html><html><head><meta charset="utf-8"><title>ambibridge</title></head>
+const indexHTML = `<!doctype html><html><head><meta charset="utf-8"><title>relume</title></head>
 <body style="font-family:sans-serif;max-width:40em;margin:2em auto">
-<h1>ambibridge</h1>
+<h1>relume</h1>
 <p>Software-Bridge für Philips Ambilight-TV &harr; Hue Bridge Pro.</p>
 <form method="post" action="/link"><button type="submit">Link-Button drücken (Pairing öffnen)</button></form>
 </body></html>`

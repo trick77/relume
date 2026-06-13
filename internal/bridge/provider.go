@@ -7,8 +7,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/trick77/ambibridge/internal/bridgepro"
-	"github.com/trick77/ambibridge/internal/translate"
+	"github.com/trick77/relume/internal/bridgepro"
+	"github.com/trick77/relume/internal/translate"
 )
 
 // lightCacheTTL begrenzt, wie oft die Bridge Pro nach Lampen gefragt wird.

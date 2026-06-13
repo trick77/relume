@@ -1,11 +1,11 @@
-# ambibridge — Plan & Stand
+# relume — Plan & Stand
 
 Software-Bridge, die einen **Philips Ambilight-TV** mit einer **Hue Bridge Pro (BSB003)**
 verbindet, indem sie sich gegenüber dem TV als alte Gen-2-Bridge (BSB002) ausgibt und alle
 Befehle über HTTPS/CLIP-v2 an die echte Bridge Pro weiterreicht.
 
 ```
-Ambilight-TV  ──HTTP:80 + SSDP + DTLS:2100──▶  ambibridge  ──HTTPS:443 + DTLS:2100──▶  Bridge Pro  ──Zigbee──▶  Lampen
+Ambilight-TV  ──HTTP:80 + SSDP + DTLS:2100──▶  relume  ──HTTPS:443 + DTLS:2100──▶  Bridge Pro  ──Zigbee──▶  Lampen
 ```
 
 ## Warum
@@ -50,10 +50,10 @@ drosselt → laggy) zurück. Der bei der Kopplung erzeugte `clientkey` ist der D
 - `internal/config` — persistenter Zustand: Identität, TV-Tokens, Pro-Kopplung, Mapping.
 - `internal/translate` — v1↔v2-Übersetzung + Lampen-/Channel-Mapping. *[M2+]*
 - `internal/bridge` — Lifecycle/Verdrahtung Frontend↔Backend. *[M2+]*
-- `cmd/ambibridge` — `serve` (Default), `link` (Pairing-Fenster), `setup` (Pro koppeln *[M2]*).
+- `cmd/relume` — `serve` (Default), `link` (Pairing-Fenster), `setup` (Pro koppeln *[M2]*).
 
 **Datenfluss Entertainment:** TV koppelt → liest Lampen/Groups → `PUT /groups/{id}
-{"stream":{"active":true}}` → ambibridge aktiviert Entertainment-Config auf der Pro, öffnet
+{"stream":{"active":true}}` → relume aktiviert Entertainment-Config auf der Pro, öffnet
 DTLS-Client zur Pro:2100 und DTLS-Server für den TV → TV-Frames werden geparst, ge-remappt,
 als HueStream-v2 an die Pro gestreamt. Stream-Stop → deaktivieren.
 
@@ -90,7 +90,7 @@ Implementiert und getestet:
 - `internal/upnp` — `/description.xml` mit BSB002-Kennung.
 - `internal/clipv1` — Pairing mit 30s-Link-Fenster (Fehler 101 ohne Druck), `username`+`clientkey`,
   `config` (`modelid=BSB002`), Datastore, Lampen/Gruppen als Platzhalter; Web-UI + `/link`.
-- `cmd/ambibridge` — `serve`/`link`, IP-Auto-Detektion.
+- `cmd/relume` — `serve`/`link`, IP-Auto-Detektion.
 
 ### Bauen & Laufen lassen
 
@@ -99,13 +99,13 @@ go build ./...
 go test ./...
 
 # Lokaler Smoke-Test (Port 80 braucht root; hier 8080):
-go run ./cmd/ambibridge serve -http-port 8080 -advertise-ip <deine-ip> -config ./ambibridge.json
+go run ./cmd/relume serve -http-port 8080 -advertise-ip <deine-ip> -config ./relume.json
 
 # In Produktion (Port 80, Discovery via SSDP):
-sudo ./ambibridge serve            # oder via Docker --network=host
+sudo ./relume serve            # oder via Docker --network=host
 
 # Pairing-Fenster öffnen (statt physischem Link-Button):
-./ambibridge link                  # oder Web-UI: http://<bridge-ip>/
+./relume link                  # oder Web-UI: http://<bridge-ip>/
 ```
 
 ### Verifiziert (Smoke-Test)

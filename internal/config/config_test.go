@@ -23,7 +23,7 @@ func TestIdentity_Derivations(t *testing.T) {
 
 func TestLoad_GeneratesAndPersistsIdentity(t *testing.T) {
 	// Given
-	path := filepath.Join(t.TempDir(), "ambibridge.json")
+	path := filepath.Join(t.TempDir(), "relume.json")
 
 	// When
 	c1, err := Load(path)
@@ -46,7 +46,7 @@ func TestLoad_GeneratesAndPersistsIdentity(t *testing.T) {
 
 func TestAddApiUser_Persists(t *testing.T) {
 	// Given
-	path := filepath.Join(t.TempDir(), "ambibridge.json")
+	path := filepath.Join(t.TempDir(), "relume.json")
 	c, _ := Load(path)
 
 	// When

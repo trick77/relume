@@ -6,7 +6,7 @@ package translate
 import (
 	"strconv"
 
-	"github.com/trick77/ambibridge/internal/bridgepro"
+	"github.com/trick77/relume/internal/bridgepro"
 )
 
 // LightMap hält die v1-Darstellung der Lampen und das ID-Mapping für die Steuerung.
