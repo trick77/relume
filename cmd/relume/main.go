@@ -78,6 +78,7 @@ type serveOptions struct {
 	tvIP                   string
 	discoveryBurstDuration time.Duration
 	discoveryBurstInterval time.Duration
+	identityProfile        string
 }
 
 func parseServeOptions(args []string) (serveOptions, error) {
@@ -89,6 +90,7 @@ func parseServeOptions(args []string) (serveOptions, error) {
 	tvIP := fs.String("tv-ip", "", "TV IP to log all mDNS questions from in debug mode")
 	burstDuration := fs.Duration("discovery-burst-duration", 0, "send SSDP and mDNS discovery announcements at startup for this long")
 	burstInterval := fs.Duration("discovery-burst-interval", time.Second, "interval for discovery-burst announcements")
+	identityProfile := fs.String("identity-profile", "", "experimental identity profile: empty/default or hass")
 	if err := fs.Parse(args); err != nil {
 		return serveOptions{}, err
 	}
@@ -100,6 +102,7 @@ func parseServeOptions(args []string) (serveOptions, error) {
 		tvIP:                   *tvIP,
 		discoveryBurstDuration: *burstDuration,
 		discoveryBurstInterval: *burstInterval,
+		identityProfile:        *identityProfile,
 	}, nil
 }
 
@@ -126,6 +129,7 @@ func runServe(args []string, log *slog.Logger) error {
 
 	clip := clipv1.New(cfg, ip, opts.httpPort, log)
 	clip.Debug = opts.debug
+	clip.IdentityProfile = opts.identityProfile
 	if cfg.Pro != nil {
 		client := bridgepro.New(cfg.Pro)
 		clip.SetLightProvider(bridge.NewLightProvider(client))
@@ -137,6 +141,7 @@ func runServe(args []string, log *slog.Logger) error {
 	responder.Debug = opts.debug
 	responder.BurstDuration = opts.discoveryBurstDuration
 	responder.BurstInterval = opts.discoveryBurstInterval
+	responder.IdentityProfile = opts.identityProfile
 	announcer := mdns.New(cfg.Identity, ip, opts.httpPort, log)
 	announcer.BurstDuration = opts.discoveryBurstDuration
 	announcer.BurstInterval = opts.discoveryBurstInterval

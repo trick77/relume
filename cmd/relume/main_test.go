@@ -15,6 +15,7 @@ func TestParseServeOptions_discoveryDiagnostics(t *testing.T) {
 		"-tv-ip", "192.0.2.30",
 		"-discovery-burst-duration", "90s",
 		"-discovery-burst-interval", "1s",
+		"-identity-profile", "hass",
 	})
 
 	// Then
@@ -41,5 +42,8 @@ func TestParseServeOptions_discoveryDiagnostics(t *testing.T) {
 	}
 	if opts.discoveryBurstInterval != time.Second {
 		t.Errorf("discoveryBurstInterval = %s", opts.discoveryBurstInterval)
+	}
+	if opts.identityProfile != "hass" {
+		t.Errorf("identityProfile = %q", opts.identityProfile)
 	}
 }

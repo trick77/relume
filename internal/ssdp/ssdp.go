@@ -19,6 +19,7 @@ const (
 	multicastAddr = "239.255.255.250:1900"
 	// server is the exact SERVER header of a real Hue bridge (verified via diyHue).
 	server      = "Linux/3.14.0 UPnP/1.0 IpBridge/1.20.0"
+	hassServer  = "Hue/1.0 UPnP/1.0 IpBridge/1.48.0"
 	notifyEvery = 60 * time.Second
 )
 
@@ -36,6 +37,9 @@ type Responder struct {
 	BurstDuration time.Duration
 	// BurstInterval is the interval used during the diagnostic burst.
 	BurstInterval time.Duration
+	// IdentityProfile selects experimental wire-identity compatibility tweaks.
+	// Empty keeps the default; "hass" matches Home Assistant emulated-hue.
+	IdentityProfile string
 }
 
 // New creates a Responder. advIP is the IP advertised in the LOCATION header
@@ -129,6 +133,13 @@ func parseHeaders(msg string) map[string]string {
 	return out
 }
 
+func (r *Responder) serverHeader() string {
+	if r.IdentityProfile == "hass" {
+		return hassServer
+	}
+	return server
+}
+
 // interfaceForIP returns the network interface that carries the given IP.
 func interfaceForIP(ip string) (*net.Interface, error) {
 	target := net.ParseIP(ip)
@@ -194,7 +205,7 @@ func (r *Responder) searchResponses() []string {
 			"EXT:\r\n"+
 			"CACHE-CONTROL: max-age=100\r\n"+
 			fmt.Sprintf("LOCATION: http://%s:%d/description.xml\r\n", r.advIP, r.httpPort)+
-			"SERVER: "+server+"\r\n"+
+			"SERVER: "+r.serverHeader()+"\r\n"+
 			"hue-bridgeid: "+r.id.BridgeID()+"\r\n"+
 			"ST: "+v.st+"\r\n"+
 			"USN: "+v.usn+"\r\n"+
@@ -280,7 +291,7 @@ func (r *Responder) notifyMessages() []string {
 			"HOST: 239.255.255.250:1900\r\n" +
 			"CACHE-CONTROL: max-age=100\r\n" +
 			fmt.Sprintf("LOCATION: http://%s:%d/description.xml\r\n", r.advIP, r.httpPort) +
-			"SERVER: " + server + "\r\n" +
+			"SERVER: " + r.serverHeader() + "\r\n" +
 			"NTS: ssdp:alive\r\n" +
 			"hue-bridgeid: " + r.id.BridgeID() + "\r\n" +
 			"NT: " + v.nt + "\r\n" +

@@ -48,7 +48,8 @@ To build locally instead: `docker build -f Containerfile -t relume:dev .`
 
 Useful `serve` flags: `-http-port` (default 80), `-advertise-ip` (empty = auto),
 `-debug` (SSDP/HTTP diagnostics + mDNS observer), `-tv-ip` (log all mDNS
-questions from that TV), `-discovery-burst-duration`, `-discovery-burst-interval`.
+questions from that TV), `-discovery-burst-duration`, `-discovery-burst-interval`,
+`-identity-profile hass` (experimental Home Assistant emulated-hue wire identity).
 
 ## Important caveats
 
@@ -65,6 +66,11 @@ inside Ambilight+Hue bridge search:
 ```bash
 relume serve -debug -advertise-ip <nas-lan-ip> -tv-ip <tv-ip> \
   -discovery-burst-duration 90s -discovery-burst-interval 1s
+
+# If the TV ignores the default identity, try the Home Assistant emulated-hue profile:
+relume serve -debug -advertise-ip <nas-lan-ip> -tv-ip <tv-ip> \
+  -discovery-burst-duration 90s -discovery-burst-interval 1s \
+  -identity-profile hass
 
 sudo tcpdump -ni <iface> 'host <tv-ip> or udp port 5353 or udp port 1900 or tcp port 80'
 ```

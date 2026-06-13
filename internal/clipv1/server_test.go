@@ -114,6 +114,28 @@ func TestDescriptionXML_containsBSB002(t *testing.T) {
 	}
 }
 
+func TestDescriptionXML_withHassProfileContainsHomeAssistantManufacturerFields(t *testing.T) {
+	// Given
+	s, ts := newTestServer(t)
+	s.IdentityProfile = "hass"
+
+	// When
+	resp := mustGet(t, ts.URL+"/description.xml")
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+
+	// Then
+	xml := string(body)
+	for _, want := range []string{
+		"<manufacturer>Royal Philips Electronics</manufacturer>",
+		"<manufacturerURL>http://www.philips.com</manufacturerURL>",
+	} {
+		if !strings.Contains(xml, want) {
+			t.Errorf("description.xml does not contain %q:\n%s", want, xml)
+		}
+	}
+}
+
 func TestShortConfig_unauthenticated(t *testing.T) {
 	// Given
 	_, ts := newTestServer(t)

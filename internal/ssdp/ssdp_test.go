@@ -58,6 +58,22 @@ func TestNotifyMessages_matchHueBridgeShape(t *testing.T) {
 	}
 }
 
+func TestSearchResponses_withHassProfileUsesHomeAssistantServerHeader(t *testing.T) {
+	// Given
+	r := testResponder()
+	r.IdentityProfile = "hass"
+
+	// When
+	msgs := r.searchResponses()
+
+	// Then
+	for _, msg := range msgs {
+		if !strings.Contains(msg, "SERVER: Hue/1.0 UPnP/1.0 IpBridge/1.48.0\r\n") {
+			t.Errorf("search response missing hass server header:\n%s", msg)
+		}
+	}
+}
+
 func TestRunBurst_sendsImmediatelyAndOnIntervalUntilDuration(t *testing.T) {
 	// Given
 	ctx := context.Background()

@@ -44,6 +44,9 @@ type Server struct {
 	// Debug enables verbose request logging (User-Agent + body) — helpful for
 	// analyzing the real behavior of unknown TVs.
 	Debug bool
+	// IdentityProfile selects experimental wire-identity compatibility tweaks.
+	// Empty keeps the default; "hass" matches Home Assistant emulated-hue.
+	IdentityProfile string
 
 	mu       sync.Mutex
 	lastLink time.Time
@@ -120,7 +123,7 @@ func (s *Server) linkActive() bool {
 }
 
 func (s *Server) handleDescription(w http.ResponseWriter, _ *http.Request) {
-	xml, err := upnp.Render(s.cfg.Identity, s.advIP, s.httpPort)
+	xml, err := upnp.RenderWithProfile(s.cfg.Identity, s.advIP, s.httpPort, s.IdentityProfile)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
