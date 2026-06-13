@@ -227,6 +227,30 @@ func TestDescriptionXML_withMediaServerAliasContainsMediaServerDeviceTypeForAlia
 	}
 }
 
+func TestDescriptionXML_withBasicDescriptorVariantKeepsBasicDeviceType(t *testing.T) {
+	// Given
+	s, ts := newTestServer(t)
+	s.IdentityProfile = "hass"
+	s.MediaServerAlias = true
+
+	// When
+	resp := mustGet(t, ts.URL+"/description.xml?relume=basic1")
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+
+	// Then
+	if got := resp.Header.Get("Cache-Control"); got != "max-age=1" {
+		t.Errorf("Cache-Control = %q, expected max-age=1", got)
+	}
+	xml := string(body)
+	if !strings.Contains(xml, "<deviceType>urn:schemas-upnp-org:device:Basic:1</deviceType>") {
+		t.Errorf("basic descriptor variant does not contain Basic deviceType:\n%s", xml)
+	}
+	if strings.Contains(xml, "<deviceType>urn:schemas-upnp-org:device:MediaServer:1</deviceType>") {
+		t.Errorf("basic descriptor variant contains MediaServer deviceType:\n%s", xml)
+	}
+}
+
 func TestShortConfig_unauthenticated(t *testing.T) {
 	// Given
 	_, ts := newTestServer(t)
