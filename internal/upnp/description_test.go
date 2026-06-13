@@ -30,6 +30,30 @@ func TestRenderWithProfile_hassUsesHomeAssistantManufacturerFields(t *testing.T)
 	}
 }
 
+func TestRenderWithProfile_ambilightUsesSignifyManufacturerFields(t *testing.T) {
+	// Given
+	id := config.Identity{Serial: "2c4d54ea2832"}
+
+	// When
+	xml, err := RenderWithProfile(id, "192.0.2.10", 80, "ambilight")
+
+	// Then
+	if err != nil {
+		t.Fatalf("RenderWithProfile: %v", err)
+	}
+	for _, want := range []string{
+		"<deviceType>urn:schemas-upnp-org:device:Basic:1</deviceType>",
+		"<manufacturer>Signify</manufacturer>",
+		"<manufacturerURL>http://www.meethue.com</manufacturerURL>",
+		"<modelName>Philips hue bridge 2015</modelName>",
+		"<modelNumber>BSB002</modelNumber>",
+	} {
+		if !strings.Contains(xml, want) {
+			t.Errorf("description.xml missing %q:\n%s", want, xml)
+		}
+	}
+}
+
 func TestRenderWithOptions_mediaServerAliasUsesMediaServerDeviceType(t *testing.T) {
 	// Given
 	id := config.Identity{Serial: "2c4d54ea2832"}

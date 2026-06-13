@@ -45,7 +45,8 @@ type Server struct {
 	// analyzing the real behavior of unknown TVs.
 	Debug bool
 	// IdentityProfile selects experimental wire-identity compatibility tweaks.
-	// Empty keeps the default; "hass" matches Home Assistant emulated-hue.
+	// Empty keeps the default; "ambilight" matches the Ambilight-specific
+	// OSS emulator; "hass" matches Home Assistant emulated-hue.
 	IdentityProfile string
 	// MediaServerAlias makes /description.xml match the opt-in SSDP MediaServer:1 alias.
 	MediaServerAlias bool
@@ -75,10 +76,20 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/{user}/config", s.handleConfig)
 	mux.HandleFunc("GET /api/{user}", s.handleDatastore)
 	mux.HandleFunc("GET /api/{user}/lights", s.handleLights)
+	mux.HandleFunc("GET /api/{user}/lights/{id}", s.handleLight)
 	mux.HandleFunc("PUT /api/{user}/lights/{id}/state", s.handleSetLightState)
 	mux.HandleFunc("GET /api/{user}/groups", s.handleGroups)
+	mux.HandleFunc("GET /api/{user}/groups/{id}", s.handleGroup)
+	mux.HandleFunc("POST /api/{user}/groups", s.handleCreateGroup)
+	mux.HandleFunc("POST /api/{user}/groups/", s.handleCreateGroup)
 	mux.HandleFunc("PUT /api/{user}/groups/{id}/action", s.handleGroupAction)
 	mux.HandleFunc("PUT /api/{user}/groups/{id}", s.handleGroupUpdate)
+	mux.HandleFunc("GET /api/{user}/capabilities", s.handleCapabilities)
+	mux.HandleFunc("GET /api/{user}/scenes", s.handleEmptyCollection)
+	mux.HandleFunc("GET /api/{user}/schedules", s.handleEmptyCollection)
+	mux.HandleFunc("GET /api/{user}/sensors", s.handleEmptyCollection)
+	mux.HandleFunc("GET /api/{user}/rules", s.handleEmptyCollection)
+	mux.HandleFunc("GET /api/{user}/resourcelinks", s.handleEmptyCollection)
 	// Virtual link button (web UI / CLI open the pairing window).
 	mux.HandleFunc("GET /", s.handleIndex)
 	mux.HandleFunc("POST /link", s.handleLink)
@@ -90,6 +101,7 @@ func (s *Server) Handler() http.Handler {
 // (e.g. the devicetype string during pairing).
 func (s *Server) logRequests(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
 		if s.Debug {
 			var body []byte
 			if r.Body != nil {
@@ -99,6 +111,7 @@ func (s *Server) logRequests(next http.Handler) http.Handler {
 			s.log.Info("http rx",
 				"method", r.Method,
 				"path", r.URL.Path,
+				"requestURI", r.URL.RequestURI(),
 				"from", r.RemoteAddr,
 				"user-agent", r.UserAgent(),
 				"body", string(body),
@@ -106,8 +119,28 @@ func (s *Server) logRequests(next http.Handler) http.Handler {
 		} else {
 			s.log.Info("http", "method", r.Method, "path", r.URL.Path, "from", r.RemoteAddr)
 		}
-		next.ServeHTTP(w, r)
+		next.ServeHTTP(rec, r)
+		if s.Debug {
+			s.log.Info("http tx", "method", r.Method, "requestURI", r.URL.RequestURI(), "status", rec.status, "bytes", rec.bytes)
+		}
 	})
+}
+
+type statusRecorder struct {
+	http.ResponseWriter
+	status int
+	bytes  int
+}
+
+func (r *statusRecorder) WriteHeader(status int) {
+	r.status = status
+	r.ResponseWriter.WriteHeader(status)
+}
+
+func (r *statusRecorder) Write(p []byte) (int, error) {
+	n, err := r.ResponseWriter.Write(p)
+	r.bytes += n
+	return n, err
 }
 
 // PressLink opens the pairing window (used by the CLI `link` command or the web UI).
@@ -189,6 +222,10 @@ func (s *Server) handleShortConfig(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
+	if s.IdentityProfile == "ambilight" && !s.cfg.HasApiUser(r.PathValue("user")) {
+		writeJSON(w, s.shortConfig())
+		return
+	}
 	if !s.authorized(w, r) {
 		return
 	}
@@ -198,9 +235,13 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 // shortConfig builds the config object; modelid MUST be BSB002.
 func (s *Server) shortConfig() map[string]any {
 	id := s.cfg.Identity
+	datastoreVersion := "131"
+	if s.IdentityProfile == "ambilight" {
+		datastoreVersion = "126"
+	}
 	return map[string]any{
 		"name":             "Philips hue",
-		"datastoreversion": "131",
+		"datastoreversion": datastoreVersion,
 		"swversion":        "1967054020",
 		"apiversion":       "1.67.0",
 		"mac":              id.MAC(),
@@ -249,6 +290,29 @@ func (s *Server) handleLights(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, lights)
 }
 
+func (s *Server) handleLight(w http.ResponseWriter, r *http.Request) {
+	if !s.authorized(w, r) {
+		return
+	}
+	id := r.PathValue("id")
+	if s.lights == nil {
+		writeError(w, 3, "/lights/"+id, "resource, /lights/"+id+", not available")
+		return
+	}
+	lights, err := s.lights.LightsV1()
+	if err != nil {
+		s.log.Warn("reading lights from bridge pro", "err", err)
+		writeError(w, 901, "/lights/"+id, "bridge pro error")
+		return
+	}
+	light, ok := lights[id]
+	if !ok {
+		writeError(w, 3, "/lights/"+id, "resource, /lights/"+id+", not available")
+		return
+	}
+	writeJSON(w, light)
+}
+
 // handleSetLightState handles the REST control path: accept v1 state, translate
 // it to v2 and forward it to the Bridge Pro.
 func (s *Server) handleSetLightState(w http.ResponseWriter, r *http.Request) {
@@ -284,7 +348,53 @@ func (s *Server) handleGroups(w http.ResponseWriter, r *http.Request) {
 	if !s.authorized(w, r) {
 		return
 	}
-	writeJSON(w, map[string]any{})
+	writeJSON(w, map[string]any{
+		"0": bridgeGroup("0"),
+		"1": bridgeGroup("1"),
+	})
+}
+
+func bridgeGroup(id string) map[string]any {
+	groupType := "Entertainment"
+	name := "Relume Entertainment"
+	if id == "0" {
+		groupType = "LightGroup"
+		name = "Group 0"
+	}
+	return map[string]any{
+		"name":   name,
+		"lights": []string{},
+		"type":   groupType,
+		"state":  map[string]any{"all_on": false, "any_on": false},
+		"action": map[string]any{},
+		"stream": map[string]any{
+			"active":    false,
+			"owner":     nil,
+			"proxymode": "auto",
+			"proxynode": "/bridge",
+		},
+	}
+}
+
+func (s *Server) handleGroup(w http.ResponseWriter, r *http.Request) {
+	if !s.authorized(w, r) {
+		return
+	}
+	id := r.PathValue("id")
+	if id != "0" && id != "1" {
+		writeError(w, 3, "/groups/"+id, "resource, /groups/"+id+", not available")
+		return
+	}
+	writeJSON(w, bridgeGroup(id))
+}
+
+func (s *Server) handleCreateGroup(w http.ResponseWriter, r *http.Request) {
+	if !s.authorized(w, r) {
+		return
+	}
+	body, _ := io.ReadAll(r.Body)
+	s.log.Info("group create (not yet persisted)", "body", string(body))
+	writeJSON(w, []map[string]any{{"success": map[string]any{"id": "1"}}})
 }
 
 // handleGroupAction is the groups REST path. Full group/entertainment support
@@ -311,6 +421,30 @@ func (s *Server) handleGroupUpdate(w http.ResponseWriter, r *http.Request) {
 	body, _ := io.ReadAll(r.Body)
 	s.log.Info("group update", "group", id, "body", string(body))
 	writeJSON(w, []map[string]any{{"success": map[string]any{"/groups/" + id: "ok"}}})
+}
+
+func (s *Server) handleCapabilities(w http.ResponseWriter, r *http.Request) {
+	if !s.authorized(w, r) {
+		return
+	}
+	writeJSON(w, map[string]any{
+		"lights":        map[string]any{"available": 60, "total": 63},
+		"sensors":       map[string]any{"available": 240, "total": 250},
+		"groups":        map[string]any{"available": 60, "total": 64},
+		"scenes":        map[string]any{"available": 172, "total": 200},
+		"rules":         map[string]any{"available": 233, "total": 250},
+		"schedules":     map[string]any{"available": 95, "total": 100},
+		"resourcelinks": map[string]any{"available": 59, "total": 64},
+		"streaming":     map[string]any{"available": 1, "total": 1, "channels": 20},
+		"timezones":     map[string]any{"values": []string{"Etc/UTC"}},
+	})
+}
+
+func (s *Server) handleEmptyCollection(w http.ResponseWriter, r *http.Request) {
+	if !s.authorized(w, r) {
+		return
+	}
+	writeJSON(w, map[string]any{})
 }
 
 // authorized checks whether the {user} from the path is a paired client.

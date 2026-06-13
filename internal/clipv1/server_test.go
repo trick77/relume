@@ -136,6 +136,31 @@ func TestDescriptionXML_withHassProfileContainsHomeAssistantManufacturerFields(t
 	}
 }
 
+func TestDescriptionXML_withAmbilightProfileKeepsSignifyManufacturerFields(t *testing.T) {
+	// Given
+	s, ts := newTestServer(t)
+	s.IdentityProfile = "ambilight"
+
+	// When
+	resp := mustGet(t, ts.URL+"/description.xml")
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+
+	// Then
+	xml := string(body)
+	for _, want := range []string{
+		"<deviceType>urn:schemas-upnp-org:device:Basic:1</deviceType>",
+		"<manufacturer>Signify</manufacturer>",
+		"<manufacturerURL>http://www.meethue.com</manufacturerURL>",
+		"<modelName>Philips hue bridge 2015</modelName>",
+		"<modelNumber>BSB002</modelNumber>",
+	} {
+		if !strings.Contains(xml, want) {
+			t.Errorf("description.xml does not contain %q:\n%s", want, xml)
+		}
+	}
+}
+
 func TestDescriptionXML_withMediaServerAliasKeepsDefaultDeviceTypeForPlainPath(t *testing.T) {
 	// Given
 	s, ts := newTestServer(t)
@@ -208,5 +233,117 @@ func TestShortConfig_unauthenticated(t *testing.T) {
 	}
 	if cfg["factorynew"] != false {
 		t.Errorf("factorynew = %v", cfg["factorynew"])
+	}
+}
+
+func TestConfigWithAmbilightProfileReturnsShortConfigForUnknownUser(t *testing.T) {
+	// Given
+	s, ts := newTestServer(t)
+	s.IdentityProfile = "ambilight"
+
+	// When
+	resp := mustGet(t, ts.URL+"/api/not-paired/config")
+	defer resp.Body.Close()
+	var cfg map[string]any
+
+	// Then
+	json.NewDecoder(resp.Body).Decode(&cfg)
+	if cfg["modelid"] != "BSB002" {
+		t.Errorf("modelid = %v", cfg["modelid"])
+	}
+	if cfg["datastoreversion"] != "126" {
+		t.Errorf("datastoreversion = %v", cfg["datastoreversion"])
+	}
+	if _, ok := cfg["error"]; ok {
+		t.Fatalf("unexpected error response: %v", cfg)
+	}
+}
+
+func TestConfigDefaultProfileRejectsUnknownUser(t *testing.T) {
+	// Given
+	_, ts := newTestServer(t)
+
+	// When
+	resp := mustGet(t, ts.URL+"/api/not-paired/config")
+	defer resp.Body.Close()
+	var out []map[string]map[string]any
+	json.NewDecoder(resp.Body).Decode(&out)
+
+	// Then
+	if len(out) != 1 || out[0]["error"] == nil {
+		t.Fatalf("expected error response, got %v", out)
+	}
+	if out[0]["error"]["type"].(float64) != 1 {
+		t.Errorf("expected type 1, got %v", out[0]["error"]["type"])
+	}
+}
+
+func TestCapabilitiesAndEmptyCollections(t *testing.T) {
+	// Given
+	s, ts := newTestServer(t)
+	s.PressLink()
+	resp := mustPost(t, ts.URL+"/api", `{"devicetype":"Philips_TV#Ambilight","generateclientkey":true}`)
+	defer resp.Body.Close()
+	var paired []map[string]map[string]string
+	json.NewDecoder(resp.Body).Decode(&paired)
+	username := paired[0]["success"]["username"]
+
+	// When
+	capResp := mustGet(t, ts.URL+"/api/"+username+"/capabilities")
+	defer capResp.Body.Close()
+	var caps map[string]any
+	json.NewDecoder(capResp.Body).Decode(&caps)
+
+	// Then
+	streaming, ok := caps["streaming"].(map[string]any)
+	if !ok {
+		t.Fatalf("streaming capabilities missing: %v", caps)
+	}
+	if streaming["available"].(float64) != 1 || streaming["channels"].(float64) != 20 {
+		t.Errorf("streaming capabilities = %v", streaming)
+	}
+
+	for _, path := range []string{"scenes", "schedules", "sensors", "rules", "resourcelinks"} {
+		resp := mustGet(t, ts.URL+"/api/"+username+"/"+path)
+		var out map[string]any
+		json.NewDecoder(resp.Body).Decode(&out)
+		resp.Body.Close()
+		if len(out) != 0 {
+			t.Errorf("%s = %v, expected empty object", path, out)
+		}
+	}
+}
+
+func TestGroupsExposeMinimalEntertainmentGroup(t *testing.T) {
+	// Given
+	s, ts := newTestServer(t)
+	s.PressLink()
+	resp := mustPost(t, ts.URL+"/api", `{"devicetype":"Philips_TV#Ambilight","generateclientkey":true}`)
+	defer resp.Body.Close()
+	var paired []map[string]map[string]string
+	json.NewDecoder(resp.Body).Decode(&paired)
+	username := paired[0]["success"]["username"]
+
+	// When
+	groupsResp := mustGet(t, ts.URL+"/api/"+username+"/groups")
+	defer groupsResp.Body.Close()
+	var groups map[string]map[string]any
+	json.NewDecoder(groupsResp.Body).Decode(&groups)
+
+	groupResp := mustGet(t, ts.URL+"/api/"+username+"/groups/1")
+	defer groupResp.Body.Close()
+	var group map[string]any
+	json.NewDecoder(groupResp.Body).Decode(&group)
+
+	// Then
+	if groups["1"]["type"] != "Entertainment" {
+		t.Fatalf("groups[1] = %v", groups["1"])
+	}
+	if group["type"] != "Entertainment" {
+		t.Fatalf("group 1 = %v", group)
+	}
+	stream, ok := group["stream"].(map[string]any)
+	if !ok || stream["proxymode"] != "auto" {
+		t.Fatalf("stream = %v", group["stream"])
 	}
 }

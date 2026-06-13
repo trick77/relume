@@ -18,10 +18,11 @@ import (
 const (
 	multicastAddr = "239.255.255.250:1900"
 	// server is the exact SERVER header of a real Hue bridge (verified via diyHue).
-	server        = "Linux/3.14.0 UPnP/1.0 IpBridge/1.20.0"
-	hassServer    = "Hue/1.0 UPnP/1.0 IpBridge/1.48.0"
-	mediaServerST = "urn:schemas-upnp-org:device:MediaServer:1"
-	notifyEvery   = 60 * time.Second
+	server          = "Linux/3.14.0 UPnP/1.0 IpBridge/1.20.0"
+	ambilightServer = "Linux/3.14.0 UPnP/1.0 IpBridge/1.67.0"
+	hassServer      = "Hue/1.0 UPnP/1.0 IpBridge/1.48.0"
+	mediaServerST   = "urn:schemas-upnp-org:device:MediaServer:1"
+	notifyEvery     = 60 * time.Second
 )
 
 // Responder answers SSDP requests for a bridge identity.
@@ -39,7 +40,8 @@ type Responder struct {
 	// BurstInterval is the interval used during the diagnostic burst.
 	BurstInterval time.Duration
 	// IdentityProfile selects experimental wire-identity compatibility tweaks.
-	// Empty keeps the default; "hass" matches Home Assistant emulated-hue.
+	// Empty keeps the default; "ambilight" matches the Ambilight-specific
+	// OSS emulator; "hass" matches Home Assistant emulated-hue.
 	IdentityProfile string
 	// MediaServerAlias also advertises/responds as UPnP MediaServer:1. Some
 	// Philips Android TVs only emit MediaServer searches during Hue+Ambilight scan.
@@ -138,10 +140,14 @@ func parseHeaders(msg string) map[string]string {
 }
 
 func (r *Responder) serverHeader() string {
-	if r.IdentityProfile == "hass" {
+	switch r.IdentityProfile {
+	case "ambilight":
+		return ambilightServer
+	case "hass":
 		return hassServer
+	default:
+		return server
 	}
-	return server
 }
 
 // interfaceForIP returns the network interface that carries the given IP.

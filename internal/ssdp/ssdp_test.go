@@ -74,6 +74,22 @@ func TestSearchResponses_withHassProfileUsesHomeAssistantServerHeader(t *testing
 	}
 }
 
+func TestSearchResponses_withAmbilightProfileUsesAmbilightServerHeader(t *testing.T) {
+	// Given
+	r := testResponder()
+	r.IdentityProfile = "ambilight"
+
+	// When
+	msgs := r.searchResponses()
+
+	// Then
+	for _, msg := range msgs {
+		if !strings.Contains(msg, "SERVER: Linux/3.14.0 UPnP/1.0 IpBridge/1.67.0\r\n") {
+			t.Errorf("search response missing ambilight server header:\n%s", msg)
+		}
+	}
+}
+
 func TestSearchResponses_withMediaServerAliasIncludesMediaServerST(t *testing.T) {
 	// Given
 	r := testResponder()

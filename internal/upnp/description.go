@@ -67,8 +67,10 @@ func Render(id config.Identity, ip string, port int) (string, error) {
 }
 
 // RenderWithProfile generates description.xml for an identity profile. The empty
-// profile keeps relume's default bridge identity; "hass" matches Home Assistant
-// emulated-hue fields that public Philips TV reports have accepted.
+// profile keeps relume's default bridge identity; "ambilight" keeps the
+// Signify/meethue fields used by Ambilight-specific Hue emulators; "hass"
+// matches Home Assistant emulated-hue fields that public Philips TV reports
+// have accepted.
 func RenderWithProfile(id config.Identity, ip string, port int, profile string) (string, error) {
 	return RenderWithOptions(id, ip, port, Options{Profile: profile})
 }
