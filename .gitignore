@@ -1,0 +1,11 @@
+# Binaries
+/ambibridge
+/cmd/ambibridge/ambibridge
+
+# Laufzeit-Zustand
+*.json.tmp
+ambibridge.json
+/data/
+
+# Logs
+*.log

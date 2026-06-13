@@ -1,0 +1,243 @@
+// Package clipv1 stellt die CLIP-v1-HTTP-Oberfläche bereit, die der Ambilight-TV
+// erwartet: /description.xml, Pairing (POST /api), Config und (in späteren
+// Meilensteinen) Lampen/Gruppen sowie das Aktivieren des Entertainment-Streams.
+package clipv1
+
+import (
+	"crypto/rand"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
+	"io"
+	"log/slog"
+	"net/http"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/trick77/ambibridge/internal/config"
+	"github.com/trick77/ambibridge/internal/upnp"
+)
+
+// linkWindow ist die Dauer, in der nach Drücken des (virtuellen) Link-Buttons ein
+// Pairing akzeptiert wird — wie an einer echten Bridge.
+const linkWindow = 30 * time.Second
+
+// Server bedient die CLIP-v1-Oberfläche.
+type Server struct {
+	cfg      *config.Config
+	advIP    string
+	httpPort int
+	log      *slog.Logger
+
+	mu       sync.Mutex
+	lastLink time.Time
+}
+
+// New erstellt den CLIP-v1-Server.
+func New(cfg *config.Config, advIP string, httpPort int, log *slog.Logger) *Server {
+	return &Server{cfg: cfg, advIP: advIP, httpPort: httpPort, log: log}
+}
+
+// Handler liefert den HTTP-Handler (Routing) für den Server.
+func (s *Server) Handler() http.Handler {
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /description.xml", s.handleDescription)
+	mux.HandleFunc("POST /api", s.handlePairing)
+	mux.HandleFunc("POST /api/", s.handlePairing) // manche Clients hängen ein "/" an
+	mux.HandleFunc("GET /api/config", s.handleShortConfig)
+	mux.HandleFunc("GET /config", s.handleShortConfig)
+	mux.HandleFunc("GET /api/{user}/config", s.handleConfig)
+	mux.HandleFunc("GET /api/{user}", s.handleDatastore)
+	mux.HandleFunc("GET /api/{user}/lights", s.handleLights)
+	mux.HandleFunc("GET /api/{user}/groups", s.handleGroups)
+	// Virtueller Link-Button (Web-UI / CLI öffnen das Pairing-Fenster).
+	mux.HandleFunc("GET /", s.handleIndex)
+	mux.HandleFunc("POST /link", s.handleLink)
+	return mux
+}
+
+// PressLink öffnet das Pairing-Fenster (vom CLI-Befehl `link` oder der Web-UI genutzt).
+func (s *Server) PressLink() {
+	s.mu.Lock()
+	s.lastLink = time.Now()
+	s.mu.Unlock()
+	s.log.Info("link-button gedrückt", "fenster", linkWindow)
+}
+
+func (s *Server) linkActive() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return time.Since(s.lastLink) <= linkWindow
+}
+
+func (s *Server) handleDescription(w http.ResponseWriter, _ *http.Request) {
+	xml, err := upnp.Render(s.cfg.Identity, s.advIP, s.httpPort)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/xml")
+	io.WriteString(w, xml)
+}
+
+type pairingRequest struct {
+	DeviceType        string `json:"devicetype"`
+	GenerateClientKey bool   `json:"generateclientkey"`
+}
+
+func (s *Server) handlePairing(w http.ResponseWriter, r *http.Request) {
+	var req pairingRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, 2, "/", "body contains invalid json")
+		return
+	}
+	s.log.Info("pairing-anfrage", "devicetype", req.DeviceType, "clientkey", req.GenerateClientKey)
+
+	if !s.linkActive() {
+		// CLIP-v1-Standardfehler 101: link button not pressed.
+		writeError(w, 101, "", "link button not pressed")
+		return
+	}
+
+	username, err := randomHex(16) // 32 Zeichen
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	user := &config.ApiUser{Username: username, DeviceType: req.DeviceType}
+
+	success := map[string]string{"username": username}
+	if req.GenerateClientKey {
+		ck, cerr := randomHex(16)
+		if cerr != nil {
+			http.Error(w, cerr.Error(), http.StatusInternalServerError)
+			return
+		}
+		ck = strings.ToUpper(ck)
+		user.ClientKey = ck
+		success["clientkey"] = ck
+	}
+	if err := s.cfg.AddApiUser(user); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	s.log.Info("tv gekoppelt", "username", username, "entertainment", req.GenerateClientKey)
+
+	writeJSON(w, []map[string]any{{"success": success}})
+}
+
+// handleShortConfig liefert die unauthentifizierte Kurz-Config (Identitätscheck).
+func (s *Server) handleShortConfig(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, s.shortConfig())
+}
+
+func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
+	if !s.authorized(w, r) {
+		return
+	}
+	writeJSON(w, s.shortConfig())
+}
+
+// shortConfig baut das Config-Objekt; modelid MUSS BSB002 sein.
+func (s *Server) shortConfig() map[string]any {
+	id := s.cfg.Identity
+	return map[string]any{
+		"name":             "Philips hue",
+		"datastoreversion": "131",
+		"swversion":        "1967054020",
+		"apiversion":       "1.67.0",
+		"mac":              id.MAC(),
+		"bridgeid":         id.BridgeID(),
+		"factorynew":       false,
+		"replacesbridgeid":  nil,
+		"modelid":          "BSB002",
+		"starterkitid":     "",
+	}
+}
+
+// handleDatastore liefert die Top-Level-Struktur, die einige Clients nach dem
+// Pairing abfragen.
+func (s *Server) handleDatastore(w http.ResponseWriter, r *http.Request) {
+	if !s.authorized(w, r) {
+		return
+	}
+	writeJSON(w, map[string]any{
+		"lights":        map[string]any{},
+		"groups":        map[string]any{},
+		"config":        s.shortConfig(),
+		"schedules":     map[string]any{},
+		"scenes":        map[string]any{},
+		"rules":         map[string]any{},
+		"sensors":       map[string]any{},
+		"resourcelinks": map[string]any{},
+	})
+}
+
+// handleLights/handleGroups: Platzhalter für M1; in M2/M3 von der Bridge Pro befüllt.
+func (s *Server) handleLights(w http.ResponseWriter, r *http.Request) {
+	if !s.authorized(w, r) {
+		return
+	}
+	writeJSON(w, map[string]any{})
+}
+
+func (s *Server) handleGroups(w http.ResponseWriter, r *http.Request) {
+	if !s.authorized(w, r) {
+		return
+	}
+	writeJSON(w, map[string]any{})
+}
+
+// authorized prüft, ob der {user} aus dem Pfad ein gekoppelter Client ist.
+func (s *Server) authorized(w http.ResponseWriter, r *http.Request) bool {
+	user := r.PathValue("user")
+	if !s.cfg.HasApiUser(user) {
+		writeError(w, 1, "/"+strings.TrimPrefix(r.URL.Path, "/api/"), "unauthorized user")
+		return false
+	}
+	return true
+}
+
+func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path != "/" {
+		http.NotFound(w, r)
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	io.WriteString(w, indexHTML)
+}
+
+func (s *Server) handleLink(w http.ResponseWriter, _ *http.Request) {
+	s.PressLink()
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	io.WriteString(w, fmt.Sprintf("<p>Link-Button gedrückt. Pairing für %s offen.</p><p><a href=\"/\">zurück</a></p>", linkWindow))
+}
+
+const indexHTML = `<!doctype html><html><head><meta charset="utf-8"><title>ambibridge</title></head>
+<body style="font-family:sans-serif;max-width:40em;margin:2em auto">
+<h1>ambibridge</h1>
+<p>Software-Bridge für Philips Ambilight-TV &harr; Hue Bridge Pro.</p>
+<form method="post" action="/link"><button type="submit">Link-Button drücken (Pairing öffnen)</button></form>
+</body></html>`
+
+func randomHex(n int) (string, error) {
+	b := make([]byte, n)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(b), nil
+}
+
+func writeJSON(w http.ResponseWriter, v any) {
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(v)
+}
+
+// writeError schreibt einen CLIP-v1-Fehler im Standardformat.
+func writeError(w http.ResponseWriter, typ int, address, description string) {
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode([]map[string]any{{
+		"error": map[string]any{"type": typ, "address": address, "description": description},
+	}})
+}
