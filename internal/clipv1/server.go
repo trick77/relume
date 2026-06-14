@@ -178,7 +178,10 @@ func (s *Server) handleDescription(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	w.Header().Set("Content-Type", "application/xml")
+	// Real Hue bridges and the confirmed-working ha-hue-entertainment emulator
+	// serve description.xml as text/xml. application/xml is suspected to make the
+	// Ambilight TV reject the descriptor and stop before POST /api.
+	w.Header().Set("Content-Type", "text/xml")
 	w.Header().Set("Server", upnp.ServerHeader(s.IdentityProfile))
 	if relumeVariant != "" {
 		w.Header().Set("Cache-Control", "max-age=1")

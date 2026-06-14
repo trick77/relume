@@ -115,6 +115,41 @@ func TestDescriptionXML_containsBSB002(t *testing.T) {
 	}
 }
 
+func TestDescriptionXML_servesTextXMLContentType(t *testing.T) {
+	// Real Hue bridges and the confirmed-working ha-hue-entertainment emulator
+	// serve description.xml as text/xml; application/xml is suspected to make the
+	// TV reject the descriptor and go silent before POST /api.
+
+	// Given
+	_, ts := newTestServer(t)
+
+	// When
+	resp := mustGet(t, ts.URL+"/description.xml")
+	defer resp.Body.Close()
+	_, _ = io.ReadAll(resp.Body)
+
+	// Then
+	if got := resp.Header.Get("Content-Type"); got != "text/xml" {
+		t.Errorf("Content-Type = %q, expected text/xml", got)
+	}
+}
+
+func TestDescriptionXML_aliasVariantServesTextXMLContentType(t *testing.T) {
+	// Given
+	s, ts := newTestServer(t)
+	s.MediaServerAlias = true
+
+	// When
+	resp := mustGet(t, ts.URL+"/description.xml?relume=ms1")
+	defer resp.Body.Close()
+	_, _ = io.ReadAll(resp.Body)
+
+	// Then
+	if got := resp.Header.Get("Content-Type"); got != "text/xml" {
+		t.Errorf("Content-Type = %q, expected text/xml", got)
+	}
+}
+
 func TestDescriptionXML_withHassProfileContainsHomeAssistantManufacturerFields(t *testing.T) {
 	// Given
 	s, ts := newTestServer(t)

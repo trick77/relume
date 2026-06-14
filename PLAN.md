@@ -47,7 +47,9 @@ The Bridge Pro breaks the Ambilight+Hue path in three ways:
 
 ## Milestones
 
-- **M1 — Discovery & pairing** ✅ done & verified. TV finds & pairs the bridge.
+- **M1 — Discovery & pairing** ⚠️ partial. The TV finds relume via mDNS and fetches
+  `/description.xml`, but **does not pair**: no measured run has reached `POST /api`. NOT verified
+  end-to-end. (See "Discovery finding" below; the earlier "done & verified" was inaccurate.)
 - **M2 — Bridge Pro client** ✅ done & verified on the real BSB003. CLIP v2 client (HTTPS +
   cert pinning), `setup`/`discover`, v2→v1 light list (16 lights via the proxy).
 - **M3 — REST control** ✅ light control done & verified (real lamp switched). `PUT lights/{id}/state`

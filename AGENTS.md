@@ -14,7 +14,11 @@ All repo content (docs, code comments, logs) is English.
 - container build file is `Containerfile` (not Dockerfile); compose file is `compose.yaml`
 
 ## identity invariants (TV rejects otherwise)
-- `modelid` MUST be `BSB002` everywhere: mDNS TXT, description.xml, /config.
+- `modelid` MUST be `BSB002` in /config, mDNS TXT, SSDP. In description.xml this is the
+  `<modelNumber>`: real bridges send `929000226503`, but the confirmed-working
+  ha-hue-entertainment emulator sends `BSB002` — so `BSB002` is fine; do not change it blindly.
+- description.xml MUST be served as `Content-Type: text/xml` (not application/xml); real bridges
+  and ha-hue-entertainment use text/xml.
 - bridgeid = upper(serial[:6] + "FFFE" + serial[6:]); serial = 12 hex; UUID = `2f402f80-da50-11e1-9b23-<serial>`.
 - UUID identical across SSDP USN, description.xml UDN. bridgeid identical across SSDP hue-bridgeid header, mDNS TXT, /config.
 
@@ -45,4 +49,7 @@ All repo content (docs, code comments, logs) is English.
 - `relume.json` holds Pro appKey/clientkey + TV tokens. Gitignored. Never commit.
 
 ## status
-M1 discovery/pairing, M2 Pro client, M3 REST light control: done+verified on real Pro. M4 entertainment (DTLS+HueStream) not started. Final TV discovery test pending on Linux. See PLAN.md.
+M2 Pro client, M3 REST light control: done+verified on real Pro. M1 discovery: TV finds relume +
+fetches description.xml but does NOT pair (never reaches POST /api) — NOT verified. Leading
+suspect fixed: description.xml served as text/xml (was application/xml); awaiting real-TV retest.
+M4 entertainment (DTLS+HueStream) not started. See PLAN.md.
