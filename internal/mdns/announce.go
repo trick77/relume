@@ -21,11 +21,6 @@ import (
 const (
 	service = "_hue._tcp"
 	domain  = "local."
-	// reannounceEvery re-publishes the mDNS record periodically. grandcat/zeroconf
-	// only announces once at registration and otherwise just answers active
-	// queries; the Ambilight TV listens passively and never queries _hue._tcp, so
-	// without this it only ever hears us in the brief window right after startup.
-	reannounceEvery = 30 * time.Second
 )
 
 // Announcer keeps the mDNS registration alive.
@@ -82,56 +77,28 @@ func (a *Announcer) Run(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("mdns register: %w", err)
 	}
+	defer server.Shutdown()
 	a.log.Info("mdns: announced as hue bridge",
 		"instance", spec.instance, "host", spec.host+"."+spec.domain, "ip", a.advIP, "port", a.port, "bridgeid", a.id.BridgeID())
 
-	// Re-announce periodically so a passively-listening TV hears us regardless of
-	// when its search starts. grandcat/zeroconf has no real conflict resolution,
-	// so re-registering never renames the instance.
-	t := time.NewTicker(reannounceEvery)
-	defer t.Stop()
-	var burstC <-chan time.Time
-	var burstT *time.Ticker
-	var burstUntil time.Time
+	// Register exactly once and keep the responder alive; grandcat/zeroconf answers
+	// the TV's active _hue._tcp queries from here on.
+	//
+	// We deliberately do NOT periodically re-register. Re-registration goes through
+	// Server.Shutdown(), which multicasts an mDNS "goodbye" (records with TTL 0)
+	// before re-announcing. The Ambilight TV actively queries _hue._tcp (confirmed
+	// by packet capture) and caches the answer, so a goodbye evicts relume from the
+	// TV's bridge list — the bridge flickers out mid-discovery and never appears.
+	// The confirmed-working ha-hue-entertainment emulator also registers exactly
+	// once. This is why relume served an identical descriptor yet was never listed.
 	if a.BurstDuration > 0 {
-		interval := a.BurstInterval
-		if interval <= 0 {
-			interval = time.Second
-		}
-		burstT = time.NewTicker(interval)
-		defer burstT.Stop()
-		burstC = burstT.C
-		burstUntil = time.Now().Add(a.BurstDuration)
-		a.log.Info("mdns: discovery burst started", "duration", a.BurstDuration, "interval", interval)
+		// The startup discovery burst is handled by the SSDP responder. mDNS needs
+		// no burst: the TV queries actively, and a real re-announce here would only
+		// emit harmful goodbye packets (see above).
+		a.log.Info("mdns: registered once; discovery burst handled via SSDP (no mDNS goodbye)")
 	}
-	for {
-		select {
-		case <-ctx.Done():
-			server.Shutdown()
-			return ctx.Err()
-		case <-burstC:
-			if time.Now().After(burstUntil) {
-				burstT.Stop()
-				burstC = nil
-				a.log.Info("mdns: discovery burst finished")
-				continue
-			}
-			s, rerr := reRegister(server, register)
-			if rerr != nil {
-				a.log.Warn("mdns: burst re-announce failed", "err", rerr)
-				continue
-			}
-			server = s
-			a.log.Info("mdns: burst re-announced as hue bridge", "instance", spec.instance, "ip", a.advIP, "port", a.port)
-		case <-t.C:
-			s, rerr := reRegister(server, register)
-			if rerr != nil {
-				a.log.Warn("mdns: re-announce failed", "err", rerr)
-				continue
-			}
-			server = s
-		}
-	}
+	<-ctx.Done()
+	return ctx.Err()
 }
 
 func (a *Announcer) serviceSpec() serviceSpec {
@@ -152,11 +119,6 @@ func (a *Announcer) serviceSpec() serviceSpec {
 			"modelid=BSB002",
 		},
 	}
-}
-
-func reRegister(current *zeroconf.Server, register func() (*zeroconf.Server, error)) (*zeroconf.Server, error) {
-	current.Shutdown()
-	return register()
 }
 
 // interfaceForIP returns the multicast-capable interface that carries the given IP.

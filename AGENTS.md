@@ -23,7 +23,13 @@ All repo content (docs, code comments, logs) is English.
 - UUID identical across SSDP USN, description.xml UDN. bridgeid identical across SSDP hue-bridgeid header, mDNS TXT, /config.
 
 ## discovery (the hard part)
-- Measured: the TV does NOT send hue SSDP M-SEARCH (only `MediaServer`), does NOT use cloud (no DNS for discovery.meethue.com), does NOT actively query `_hue._tcp`. It LISTENS passively for the `_hue._tcp` mDNS announcement.
+- mDNS announce MUST register exactly once and NEVER re-register/re-announce via
+  `Server.Shutdown()`: grandcat/zeroconf's Shutdown multicasts an mDNS goodbye (TTL 0) that evicts
+  relume from the TV's cache → bridge flickers out of the Ambilight list. This (not the descriptor)
+  was the real discovery bug; fixed in `internal/mdns/announce.go`.
+- Measured: the TV (65OLED806, Android 11) DOES actively query `_hue._tcp` during the Ambilight
+  search (capture), then fetches plain `/description.xml`. It does NOT send hue SSDP M-SEARCH (only
+  `MediaServer`), does NOT use cloud (no DNS for discovery.meethue.com).
 - So mDNS announce is the primary path. Working ref = hass-emulated-hue: instance name exactly `Philips Hue - XXXXXX` (last 6 of bridgeid, spaces around dash), TXT bridgeid+modelid. diyHue name `DIYHue-XXXXXX` NOT found by TV.
 - The real Bridge Pro also announces `_hue._tcp` as `Hue Bridge - XXXXXX` / `modelid=BSB003`. TV likely filters BSB003 out.
 - Port 10102 broadcasts from the TV are DTS Play-Fi (audio), a red herring — not Hue.
@@ -49,7 +55,8 @@ All repo content (docs, code comments, logs) is English.
 - `relume.json` holds Pro appKey/clientkey + TV tokens. Gitignored. Never commit.
 
 ## status
-M2 Pro client, M3 REST light control: done+verified on real Pro. M1 discovery: TV finds relume +
-fetches description.xml but does NOT pair (never reaches POST /api) — NOT verified. Leading
-suspect fixed: description.xml served as text/xml (was application/xml); awaiting real-TV retest.
+M2 Pro client, M3 REST light control: done+verified on real Pro. M1 discovery: TV (65OLED806)
+fetched description.xml but never listed relume. Root cause found: mDNS re-announce sent goodbye
+(TTL 0) packets every cycle, evicting the bridge from the TV cache — fixed to register-once
+(text/xml change earlier did NOT fix it). Awaiting real-TV retest of the register-once build.
 M4 entertainment (DTLS+HueStream) not started. See PLAN.md.

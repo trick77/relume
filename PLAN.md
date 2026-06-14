@@ -110,6 +110,18 @@ The Bridge Pro breaks the Ambilight+Hue path in three ways:
 | `0.1.13` | Added `-ssdp-descriptor-variants` and `/description.xml?relume=basic1`. | Windows Chromium/DIAL fetched `basic1`; the TV fetched plain `/description.xml` and `?relume=ms1` only. Still no `/api`. |
 | `0.1.15` | Added `-description-profile ambilight-reference`. | TV fetched changed `?relume=ms1` descriptor bytes; still no `/api`. |
 | `0.1.16` | Added `-ssdp-media-server-basic-body`. | Pending real-TV result. |
+| `0.1.17` | `description.xml` served as `text/xml` (was `application/xml`). | Capture (65OLED806): TV queries `_hue._tcp`, fetches descriptor (200), then **nothing** — still not listed. Content-Type was NOT the cause. |
+| next | mDNS register-once; removed Shutdown-based re-announce (was emitting goodbye/TTL-0 packets that evicted the bridge from the TV cache). | Root cause: relume's periodic re-announce flickered itself out of the TV's `_hue._tcp` cache; confirmed-working 83noit registers once. Awaiting real-TV retest. |
+
+## Root cause (found after the table above)
+
+relume's `description.xml`, mDNS records and `/config` are byte-equivalent to the confirmed-working
+`83noit/ha-hue-entertainment` emulator (verified against its source; same TV series 55OLED806 vs the
+user's 65OLED806). The difference was behavioral, not content: relume re-announced mDNS every 30s
+(every 2s during the burst) via `grandcat/zeroconf` `Server.Shutdown()`, which multicasts an mDNS
+goodbye (TTL 0). The Android TV actively queries `_hue._tcp`, caches the answer, then receives the
+goodbye and drops the bridge. 83noit registers exactly once and never sends goodbye. Fix:
+register-once in `internal/mdns/announce.go`.
 
 ## Open items (verify on the real device)
 
