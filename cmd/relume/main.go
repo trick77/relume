@@ -252,7 +252,7 @@ func autoPairPro(ctx context.Context, cfg *config.Config, clip *clipv1.Server, b
 			log.Info("bridge pro discovered", "host", host)
 			break
 		}
-		log.Warn("bridge pro not found via cloud discovery; retrying (or pass -bridge-ip)", "err", derr)
+		log.Warn("bridge pro not paired yet: not found via cloud discovery — power the Bridge Pro on, or pass -bridge-ip; retrying", "err", derr)
 		if !sleepCtx(ctx, 15*time.Second) {
 			return
 		}
@@ -266,7 +266,7 @@ func autoPairPro(ctx context.Context, cfg *config.Config, clip *clipv1.Server, b
 			log.Info("bridge pro certificate pinned", "sha256", fp)
 			break
 		}
-		log.Warn("bridge pro cert fetch failed; retrying", "err", ferr)
+		log.Warn("bridge pro not paired yet: cannot reach it to pin its certificate — power the Bridge Pro on; retrying", "host", host, "err", ferr)
 		if !sleepCtx(ctx, 15*time.Second) {
 			return
 		}
