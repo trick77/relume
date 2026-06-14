@@ -152,7 +152,7 @@ func runServe(args []string, log *slog.Logger) error {
 	clip.MediaServerBasicBody = opts.ssdpMediaServerBasicBody
 	if cfg.Pro != nil {
 		client := bridgepro.New(cfg.Pro)
-		clip.SetLightProvider(bridge.NewLightProvider(client))
+		clip.SetLightProvider(bridge.NewLightProvider(client, log))
 		log.Info("bridge pro paired", "host", cfg.Pro.Host)
 	}
 	var responder *ssdp.Responder
@@ -182,6 +182,9 @@ func runServe(args []string, log *slog.Logger) error {
 		log.Warn("no bridge pro paired yet – auto-pairing in background; TAP the Bridge Pro link button")
 		go autoPairPro(ctx, cfg, clip, opts.bridgeIP, opts.skipTLS, log)
 	} else {
+		// A restart drops the TV's REST session, leaving the lights frozen on their
+		// last Ambilight color — blink them red to signal the restart, then off.
+		go bridge.FlashRestart(bridgepro.New(cfg.Pro), log)
 		// Keep the already-paired Pro reachable across reboots / IP changes.
 		go watchPro(ctx, cfg, clip, opts.bridgeIP, opts.skipTLS, log)
 	}
@@ -236,6 +239,10 @@ func runServe(args []string, log *slog.Logger) error {
 		return err
 	}
 	shutdownHTTP(httpSrv)
+	// Stop accepting TV writes first (above), then signal the restart on the lights.
+	if cfg.Pro != nil {
+		bridge.FlashRestart(bridgepro.New(cfg.Pro), log)
+	}
 	return nil
 }
 
@@ -291,7 +298,7 @@ func autoPairPro(ctx context.Context, cfg *config.Config, clip *clipv1.Server, b
 				return
 			}
 			client := bridgepro.New(pro)
-			clip.SetLightProvider(bridge.NewLightProvider(client))
+			clip.SetLightProvider(bridge.NewLightProvider(client, log))
 			log.Info("bridge pro paired (auto)", "host", host)
 			if lights, lerr := client.Lights(); lerr == nil {
 				log.Info("bridge pro lights available", "count", len(lights))
@@ -354,7 +361,7 @@ func watchPro(ctx context.Context, cfg *config.Config, clip *clipv1.Server, brid
 			log.Error("persisting reconnected bridge pro", "err", serr)
 			continue
 		}
-		clip.SetLightProvider(bridge.NewLightProvider(bridgepro.New(updated)))
+		clip.SetLightProvider(bridge.NewLightProvider(bridgepro.New(updated), log))
 		pro = updated
 		log.Info("bridge pro reconnected", "host", host)
 	}

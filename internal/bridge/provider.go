@@ -4,6 +4,7 @@ package bridge
 
 import (
 	"fmt"
+	"log/slog"
 	"sync"
 	"time"
 
@@ -14,20 +15,49 @@ import (
 // lightCacheTTL limits how often the Bridge Pro is queried for lights.
 const lightCacheTTL = 5 * time.Second
 
+// proClient is the subset of *bridgepro.Client the provider needs (read + control),
+// extracted so the optimistic control path can be tested without a live Bridge Pro.
+type proClient interface {
+	Lights() ([]bridgepro.Light, error)
+	SetLight(uuid string, v2body map[string]any) error
+}
+
 // LightProvider implements clipv1.LightProvider on top of the Bridge Pro and
-// holds the v1→UUID mapping for later control (M3).
+// holds the v1→UUID mapping for control (REST fallback path).
 type LightProvider struct {
-	client *bridgepro.Client
+	client proClient
+	log    *slog.Logger
 
 	mu        sync.Mutex
 	cached    map[string]any
 	v1ToUUID  map[string]string
 	fetchedAt time.Time
+
+	// Optimistic REST control: the TV's per-light writes are acknowledged
+	// immediately (see SetLightV1) and forwarded to the Bridge Pro asynchronously
+	// by drain. pending keeps only the latest state per light, so intermediate
+	// Ambilight frames the Bridge Pro cannot keep up with are coalesced away.
+	ctrlMu   sync.Mutex
+	pending  map[string]map[string]any
+	draining bool
+
+	// Forward errors are summarized rather than logged per failed write: the
+	// optimistic ack removes the old per-write back-pressure, so a down Bridge Pro
+	// would otherwise spam a Warn many times per second (cf. the Ambilight activity
+	// summary). errCount accumulates failures between rollups.
+	errMu      sync.Mutex
+	errCount   int
+	lastErrLog time.Time
 }
 
-// NewLightProvider creates a provider for the given Bridge Pro.
-func NewLightProvider(client *bridgepro.Client) *LightProvider {
-	return &LightProvider{client: client}
+// errLogInterval bounds how often forward failures are logged (a summary with the
+// suppressed count), matching the Ambilight activity-summary cadence.
+const errLogInterval = 30 * time.Second
+
+// NewLightProvider creates a provider for the given Bridge Pro. log receives the
+// asynchronous control-path errors that are no longer surfaced to the TV.
+func NewLightProvider(client *bridgepro.Client, log *slog.Logger) *LightProvider {
+	return &LightProvider{client: client, log: log, pending: map[string]map[string]any{}}
 }
 
 // LightsV1 returns the v1 light list (with a short cache).
@@ -56,9 +86,70 @@ func (p *LightProvider) UUIDForV1(v1id string) (string, bool) {
 	return uuid, ok
 }
 
-// SetLightV1 sets the state of a light by its v1 ID. The v1 state is
-// translated to v2 and forwarded to the Bridge Pro (REST fallback path).
+// SetLightV1 queues the latest state for a light and returns immediately; the
+// write is forwarded to the Bridge Pro asynchronously by drain. Acknowledging the
+// TV right away keeps its REST control path from blocking on the Bridge Pro
+// round-trip — the dominant Ambilight lag. Bridge Pro errors are logged, not
+// surfaced to the TV (latency over error reporting). Always returns nil.
 func (p *LightProvider) SetLightV1(v1id string, v1state map[string]any) error {
+	p.ctrlMu.Lock()
+	p.pending[v1id] = v1state
+	if !p.draining {
+		p.draining = true
+		go p.drain()
+	}
+	p.ctrlMu.Unlock()
+	return nil
+}
+
+// drain forwards queued light states to the Bridge Pro until none remain, keeping
+// only the latest state per light. It runs in its own goroutine started by
+// SetLightV1 and exits once the queue is empty, so a replaced provider's goroutine
+// terminates on its own (no writes arrive → drain finishes).
+func (p *LightProvider) drain() {
+	for {
+		p.ctrlMu.Lock()
+		if len(p.pending) == 0 {
+			p.draining = false
+			p.ctrlMu.Unlock()
+			return
+		}
+		batch := p.pending
+		p.pending = map[string]map[string]any{}
+		p.ctrlMu.Unlock()
+
+		for v1id, v1state := range batch {
+			if err := p.forward(v1id, v1state); err != nil {
+				p.recordForwardErr(err)
+			}
+		}
+	}
+}
+
+// recordForwardErr logs the first failure of a burst immediately, then suppresses
+// further ones and emits a summary at most every errLogInterval with the count of
+// suppressed failures — so a down Bridge Pro cannot flood the log.
+func (p *LightProvider) recordForwardErr(err error) {
+	if p.log == nil {
+		return
+	}
+	p.errMu.Lock()
+	p.errCount++
+	now := time.Now()
+	if p.lastErrLog.IsZero() || now.Sub(p.lastErrLog) >= errLogInterval {
+		count := p.errCount
+		p.errCount = 0
+		p.lastErrLog = now
+		p.errMu.Unlock()
+		p.log.Warn("forwarding lights to bridge pro failing", "failures", count, "last_err", err)
+		return
+	}
+	p.errMu.Unlock()
+}
+
+// forward translates a v1 state to v2 and writes it to the Bridge Pro, resolving
+// the v1→UUID mapping (loading the light list once if it is not built yet).
+func (p *LightProvider) forward(v1id string, v1state map[string]any) error {
 	uuid, ok := p.UUIDForV1(v1id)
 	if !ok {
 		// Mapping may not be built yet → load lights once and check again.
