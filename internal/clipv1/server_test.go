@@ -493,6 +493,65 @@ func TestCapabilitiesAndEmptyCollections(t *testing.T) {
 	}
 }
 
+type fakeLightProvider struct{ lights map[string]any }
+
+func (f fakeLightProvider) LightsV1() (map[string]any, error)       { return f.lights, nil }
+func (f fakeLightProvider) SetLightV1(string, map[string]any) error { return nil }
+
+// The TV reads the bulbs from the full datastore (GET /api/{user}), not from a
+// separate /lights call — so the datastore MUST surface the paired Pro's lights,
+// otherwise the TV reports "no hue color bulbs found".
+func TestDatastore_includesLightsFromProvider(t *testing.T) {
+	// Given
+	s, ts := newTestServer(t)
+	s.SetLightProvider(fakeLightProvider{lights: map[string]any{
+		"1": map[string]any{"name": "Lamp", "type": "Extended color light"},
+	}})
+	resp := mustPostUA(t, ts.URL+"/api", `{"devicetype":"Philips_TV#Ambilight","generateclientkey":true}`, tvUserAgent)
+	defer resp.Body.Close()
+	var paired []map[string]map[string]string
+	json.NewDecoder(resp.Body).Decode(&paired)
+	username := paired[0]["success"]["username"]
+
+	// When
+	dsResp := mustGet(t, ts.URL+"/api/"+username)
+	defer dsResp.Body.Close()
+	var ds map[string]any
+	json.NewDecoder(dsResp.Body).Decode(&ds)
+
+	// Then
+	lights, ok := ds["lights"].(map[string]any)
+	if !ok || len(lights) != 1 {
+		t.Fatalf("datastore lights = %v, want one light", ds["lights"])
+	}
+	if _, ok := lights["1"]; !ok {
+		t.Fatalf("datastore lights missing id 1: %v", lights)
+	}
+}
+
+// Without a paired Pro the datastore lights are an empty object, never missing.
+func TestDatastore_lightsEmptyWhenNoProvider(t *testing.T) {
+	// Given
+	_, ts := newTestServer(t)
+	resp := mustPostUA(t, ts.URL+"/api", `{"devicetype":"Philips_TV#Ambilight","generateclientkey":true}`, tvUserAgent)
+	defer resp.Body.Close()
+	var paired []map[string]map[string]string
+	json.NewDecoder(resp.Body).Decode(&paired)
+	username := paired[0]["success"]["username"]
+
+	// When
+	dsResp := mustGet(t, ts.URL+"/api/"+username)
+	defer dsResp.Body.Close()
+	var ds map[string]any
+	json.NewDecoder(dsResp.Body).Decode(&ds)
+
+	// Then
+	lights, ok := ds["lights"].(map[string]any)
+	if !ok || len(lights) != 0 {
+		t.Fatalf("datastore lights = %v, want empty object", ds["lights"])
+	}
+}
+
 func TestGroupsExposeMinimalEntertainmentGroup(t *testing.T) {
 	// Given
 	_, ts := newTestServer(t)

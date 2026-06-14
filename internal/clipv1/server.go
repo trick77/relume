@@ -77,6 +77,22 @@ func (s *Server) lightProvider() LightProvider {
 	return s.lights
 }
 
+// lightsV1 returns the Bridge Pro lights (v1-translated), or an empty map if no
+// backend is paired yet or the read fails. This is the single source of truth for
+// the lights both in GET /api/{user} (full datastore) and GET /api/{user}/lights.
+func (s *Server) lightsV1() map[string]any {
+	lp := s.lightProvider()
+	if lp == nil {
+		return map[string]any{}
+	}
+	lights, err := lp.LightsV1()
+	if err != nil {
+		s.log.Warn("reading lights from bridge pro", "err", err)
+		return map[string]any{}
+	}
+	return lights
+}
+
 // Handler returns the HTTP handler (routing) for the server.
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
@@ -297,7 +313,7 @@ func (s *Server) handleDatastore(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, map[string]any{
-		"lights":        map[string]any{},
+		"lights":        s.lightsV1(),
 		"groups":        map[string]any{},
 		"config":        s.shortConfig(),
 		"schedules":     map[string]any{},
@@ -314,18 +330,7 @@ func (s *Server) handleLights(w http.ResponseWriter, r *http.Request) {
 	if !s.authorized(w, r) {
 		return
 	}
-	lp := s.lightProvider()
-	if lp == nil {
-		writeJSON(w, map[string]any{})
-		return
-	}
-	lights, err := lp.LightsV1()
-	if err != nil {
-		s.log.Warn("reading lights from bridge pro", "err", err)
-		writeJSON(w, map[string]any{})
-		return
-	}
-	writeJSON(w, lights)
+	writeJSON(w, s.lightsV1())
 }
 
 func (s *Server) handleLight(w http.ResponseWriter, r *http.Request) {
