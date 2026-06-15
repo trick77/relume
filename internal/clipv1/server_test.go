@@ -587,6 +587,40 @@ func TestDatastore_lightsEmptyWhenNoProvider(t *testing.T) {
 	}
 }
 
+// LastActivity must advance when the TV writes a light state, so the idle-off
+// monitor can detect the TV going silent. It must stay zero before any write.
+func TestLastActivity_advancesOnLightStateWrite(t *testing.T) {
+	// Given: a paired TV and a light provider
+	s, ts := newTestServer(t)
+	s.SetLightProvider(fakeLightProvider{lights: map[string]any{
+		"1": map[string]any{"name": "Lamp", "type": "Extended color light"},
+	}})
+	if !s.LastActivity().IsZero() {
+		t.Fatalf("LastActivity before any write = %v, want zero", s.LastActivity())
+	}
+	resp := mustPostUA(t, ts.URL+"/api", `{"devicetype":"Philips_TV#Ambilight","generateclientkey":true}`, tvUserAgent)
+	defer resp.Body.Close()
+	var paired []map[string]map[string]string
+	json.NewDecoder(resp.Body).Decode(&paired)
+	username := paired[0]["success"]["username"]
+
+	// When: the TV writes a light state
+	req, err := http.NewRequest(http.MethodPut, ts.URL+"/api/"+username+"/lights/1/state", strings.NewReader(`{"on":true,"bri":254}`))
+	if err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	put, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("put: %v", err)
+	}
+	put.Body.Close()
+
+	// Then
+	if s.LastActivity().IsZero() {
+		t.Fatal("LastActivity still zero after a light-state write")
+	}
+}
+
 func TestLightStateWriteID_matchesOnlyStatePUTs(t *testing.T) {
 	cases := []struct {
 		method, path string
@@ -631,6 +665,124 @@ func TestActivitySummary_accumulatesDistinctLightsAndResets(t *testing.T) {
 	s.flushActivity(30 * time.Second) // nothing accumulated since reset
 	if buf.Len() != 0 {
 		t.Fatalf("expected no summary after reset, got %q", buf.String())
+	}
+}
+
+func mustPut(t *testing.T, url, body string) *http.Response {
+	t.Helper()
+	req, err := http.NewRequest(http.MethodPut, url, strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("PUT %s: %v", url, err)
+	}
+	return resp
+}
+
+func TestStreamActivation_underProbe_confirmsAndReflectsOwner(t *testing.T) {
+	// Given: the entertainment probe is on and the TV is paired
+	s, ts := newTestServer(t)
+	s.EntProbe = true
+	resp := mustPostUA(t, ts.URL+"/api", `{"devicetype":"Philips_TV#Ambilight","generateclientkey":true}`, tvUserAgent)
+	defer resp.Body.Close()
+	var paired []map[string]map[string]string
+	json.NewDecoder(resp.Body).Decode(&paired)
+	username := paired[0]["success"]["username"]
+
+	// When: the TV activates the entertainment stream
+	actResp := mustPut(t, ts.URL+"/api/"+username+"/groups/1", `{"stream":{"active":true}}`)
+	defer actResp.Body.Close()
+	var act []map[string]map[string]any
+	json.NewDecoder(actResp.Body).Decode(&act)
+
+	// Then: it is confirmed with the real v1 success shape (not a generic "ok")
+	if got := act[0]["success"]["/groups/1/stream/active"]; got != true {
+		t.Fatalf("activation response = %v", act)
+	}
+
+	// And: GET /groups/1 reflects the live stream with the owner set
+	groupResp := mustGet(t, ts.URL+"/api/"+username+"/groups/1")
+	defer groupResp.Body.Close()
+	var group map[string]any
+	json.NewDecoder(groupResp.Body).Decode(&group)
+	stream := group["stream"].(map[string]any)
+	if stream["active"] != true {
+		t.Fatalf("stream not active: %v", stream)
+	}
+	if stream["owner"] != username {
+		t.Fatalf("stream owner = %v, want %s", stream["owner"], username)
+	}
+}
+
+func TestStreamActivation_withoutProbe_keepsLegacyAck(t *testing.T) {
+	// Given: the probe is off (default)
+	s, ts := newTestServer(t)
+	resp := mustPostUA(t, ts.URL+"/api", `{"devicetype":"Philips_TV#Ambilight","generateclientkey":true}`, tvUserAgent)
+	defer resp.Body.Close()
+	var paired []map[string]map[string]string
+	json.NewDecoder(resp.Body).Decode(&paired)
+	username := paired[0]["success"]["username"]
+	_ = s
+
+	// When: the TV activates the entertainment stream
+	actResp := mustPut(t, ts.URL+"/api/"+username+"/groups/1", `{"stream":{"active":true}}`)
+	defer actResp.Body.Close()
+	var act []map[string]map[string]any
+	json.NewDecoder(actResp.Body).Decode(&act)
+
+	// Then: the legacy generic ack is returned and the stream stays inactive
+	if got := act[0]["success"]["/groups/1"]; got != "ok" {
+		t.Fatalf("expected legacy ok ack, got %v", act)
+	}
+	groupResp := mustGet(t, ts.URL+"/api/"+username+"/groups/1")
+	defer groupResp.Body.Close()
+	var group map[string]any
+	json.NewDecoder(groupResp.Body).Decode(&group)
+	if group["stream"].(map[string]any)["active"] != false {
+		t.Fatalf("stream should stay inactive without probe: %v", group["stream"])
+	}
+}
+
+func TestStreamActiveFromBody(t *testing.T) {
+	cases := []struct {
+		body         string
+		wantActive   bool
+		wantHasField bool
+	}{
+		{`{"stream":{"active":true}}`, true, true},
+		{`{"stream":{"active":false}}`, false, true},
+		{`{"on":{"on":true}}`, false, false}, // ordinary group update, no stream field
+		{`not json`, false, false},
+	}
+	for _, c := range cases {
+		active, ok := streamActiveFromBody([]byte(c.body))
+		if active != c.wantActive || ok != c.wantHasField {
+			t.Fatalf("streamActiveFromBody(%q) = (%v,%v), want (%v,%v)", c.body, active, ok, c.wantActive, c.wantHasField)
+		}
+	}
+}
+
+func TestActivitySummary_includesGroupActionWritesAndHz(t *testing.T) {
+	// Given: a mix of per-light and group-action writes over a 10s window
+	s, _ := newTestServer(t)
+	for _, id := range []string{"1", "2"} {
+		s.recordLightWrite(id)
+	}
+	for i := 0; i < 8; i++ {
+		s.recordGroupActionWrite()
+	}
+
+	// When: the summary fires
+	var buf strings.Builder
+	s.log = slog.New(slog.NewTextHandler(&buf, nil))
+	s.flushActivity(10 * time.Second)
+
+	// Then: it reports both paths and the derived total rate (10 writes / 10s = 1 Hz)
+	out := buf.String()
+	if !strings.Contains(out, "group_action_writes=8") || !strings.Contains(out, "total_hz=1") {
+		t.Fatalf("summary = %q", out)
 	}
 }
 

@@ -11,6 +11,11 @@ All repo content (docs, code comments, logs) is English.
 - `go test ./...`
 - diagnostics: `relume serve -debug` (SSDP header log + mDNS observer + HTTP body log);
   `-disable-ssdp` runs mDNS-only (like ha-hue-entertainment) to isolate SSDP from discovery
+- env diagnostics (no -debug flood): `RELUME_GAP_TRACE=1` logs inter-write gaps (idle-off
+  calibration). `RELUME_ENT_PROBE=1` is the entertainment lag probe: confirms the TV's stream
+  activation with the real v1 success shape (so the TV proceeds to DTLS instead of aborting),
+  passively watches udp :2100 for the TV's ClientHello, and adds Hz to the `ambilight activity`
+  rollup. grep `ENTERTAINMENT` and `ambilight activity`. Probe-only — never sends DTLS.
 - commands: `serve` (default), `setup` (manual Pro pair — optional), `discover` (cloud), `avahi-service`, `version`
 - pairing is auto-accepted (no link button, no UI) — but ONLY for the TV (source IP == `-tv-ip`, or
   the Android/Dalvik Philips-TV User-Agent); other LAN devices get error 101. POST /api is
