@@ -38,7 +38,7 @@ func TestFlashRestart_blinksRedTwiceThenOff(t *testing.T) {
 	fc := &flashFake{lights: []bridgepro.Light{{ID: "uuid-1"}}}
 
 	// When
-	FlashRestart(fc, nil)
+	FlashRestart(fc, nil, []string{"uuid-1"})
 
 	// Then: on(red), off, on(red), off — two red blinks ending off
 	want := []flashStep{{on: true, red: true}, {on: false}, {on: true, red: true}, {on: false}}
@@ -55,12 +55,51 @@ func TestFlashRestart_blinksRedTwiceThenOff(t *testing.T) {
 	}
 }
 
-func TestFlashRestart_noLightsIsNoop(t *testing.T) {
+func TestFlashRestart_noControlledLightsIsNoop(t *testing.T) {
 	defer withFastFlash()()
-	fc := &flashFake{lights: nil}
-	FlashRestart(fc, nil) // must not panic or block
+	fc := &flashFake{lights: []bridgepro.Light{{ID: "uuid-1"}}}
+	FlashRestart(fc, nil, nil) // unknown ambilight set → must not touch any light
 	if len(fc.steps) != 0 {
-		t.Fatalf("expected no writes, got %+v", fc.steps)
+		t.Fatalf("expected no writes when no controlled lights, got %+v", fc.steps)
+	}
+}
+
+// uuidFake records exactly which light UUIDs SetLight was called for.
+type uuidFake struct {
+	mu   sync.Mutex
+	hits []string
+}
+
+func (f *uuidFake) Lights() ([]bridgepro.Light, error) {
+	return []bridgepro.Light{{ID: "uuid-1"}, {ID: "uuid-2"}, {ID: "uuid-3"}}, nil
+}
+
+func (f *uuidFake) SetLight(uuid string, _ map[string]any) error {
+	f.mu.Lock()
+	f.hits = append(f.hits, uuid)
+	f.mu.Unlock()
+	return nil
+}
+
+func TestFlash_touchesOnlyTargetUUIDs_notTheWholeHome(t *testing.T) {
+	// Given: the Pro has three lights but the TV only drives uuid-2
+	defer withFastFlash()()
+	fc := &uuidFake{}
+
+	// When
+	FlashRestart(fc, nil, []string{"uuid-2"})
+
+	// Then: every write targeted uuid-2 only — uuid-1 and uuid-3 are never touched
+	fc.mu.Lock()
+	hits := fc.hits
+	fc.mu.Unlock()
+	if len(hits) == 0 {
+		t.Fatal("expected writes to the controlled light")
+	}
+	for _, u := range hits {
+		if u != "uuid-2" {
+			t.Fatalf("flash touched a non-ambilight light %q (hits=%v)", u, hits)
+		}
 	}
 }
 
@@ -93,7 +132,7 @@ func TestFlashIdle_blinksGreenTwiceThenOff(t *testing.T) {
 	fc := &flashFake{lights: []bridgepro.Light{{ID: "uuid-1"}}}
 
 	// When
-	FlashIdle(fc, nil)
+	FlashIdle(fc, nil, []string{"uuid-1"})
 
 	// Then: on(color), off, on(color), off — two blinks ending off
 	want := []flashStep{{on: true, red: true}, {on: false}, {on: true, red: true}, {on: false}}
@@ -116,7 +155,7 @@ func TestFlashIdle_usesGreenNotRed(t *testing.T) {
 	cf := &colorFake{}
 
 	// When
-	FlashIdle(cf, nil)
+	FlashIdle(cf, nil, []string{"uuid-1"})
 
 	// Then: every on-write uses the green primary's x (0.217), not red's (0.675)
 	cf.mu.Lock()

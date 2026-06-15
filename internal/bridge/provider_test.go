@@ -42,9 +42,35 @@ func (f *fakeClient) seen() []int {
 }
 
 func newTestProvider(c proClient) *LightProvider {
-	p := &LightProvider{client: c, pending: map[string]map[string]any{}}
-	p.v1ToUUID = map[string]string{"1": "uuid-1"} // skip the Lights() resolution
+	p := &LightProvider{client: c, pending: map[string]map[string]any{}, reported: map[string]struct{}{}}
+	p.v1ToUUID = map[string]string{"1": "uuid-1", "2": "uuid-2"} // skip the Lights() resolution
 	return p
+}
+
+func TestOnControlled_firesOncePerLightUUID(t *testing.T) {
+	// Given: a provider that records which UUIDs the TV drives
+	fc := &fakeClient{}
+	p := newTestProvider(fc)
+	var mu sync.Mutex
+	var got []string
+	p.OnControlled = func(uuid string) {
+		mu.Lock()
+		got = append(got, uuid)
+		mu.Unlock()
+	}
+
+	// When: light 1 is driven repeatedly and light 2 once
+	for i := 0; i < 5; i++ {
+		_ = p.forward("1", map[string]any{"ct": 200})
+	}
+	_ = p.forward("2", map[string]any{"ct": 200})
+
+	// Then: each controlled UUID is reported exactly once (not per frame)
+	mu.Lock()
+	defer mu.Unlock()
+	if len(got) != 2 || got[0] != "uuid-1" || got[1] != "uuid-2" {
+		t.Fatalf("OnControlled calls = %v, want [uuid-1 uuid-2]", got)
+	}
 }
 
 func TestSetLightV1_isAsyncAndForwards(t *testing.T) {

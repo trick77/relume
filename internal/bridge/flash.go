@@ -22,46 +22,47 @@ var (
 	flashOffDur = 160 * time.Millisecond
 )
 
-// FlashRestart blinks all Bridge Pro lights red flashCount times and leaves them
-// off — a visible "relume restarted" indicator. A relume restart drops the TV's
-// REST control session, so the lights would otherwise stay frozen on their last
-// Ambilight color until the TV reconnects. See flashColor for the mechanics.
-func FlashRestart(client proClient, log *slog.Logger) {
-	flashColor(client, log, flashRedXY, "restart flash")
+// FlashRestart blinks the TV-controlled Ambilight bulbs red flashCount times and
+// leaves them off — a visible "relume restarted" indicator. A relume restart
+// drops the TV's REST control session, so those lights would otherwise stay
+// frozen on their last Ambilight color until the TV reconnects. targetUUIDs are
+// the Bridge Pro light UUIDs the TV drives (config.GetControlledLights); ONLY
+// those are touched, never the rest of the home. See flashColor.
+func FlashRestart(client proClient, log *slog.Logger, targetUUIDs []string) {
+	flashColor(client, log, flashRedXY, "restart flash", targetUUIDs)
 }
 
-// FlashIdle blinks all Bridge Pro lights green flashCount times and leaves them
-// off — the idle-off indicator. When the TV is switched off it simply stops
-// sending its REST light-state writes (there is no off signal), so the lights
-// would otherwise stay frozen on their last Ambilight color. The idle monitor
-// (see cmd/relume) calls this once the writes have gone silent for the timeout.
-func FlashIdle(client proClient, log *slog.Logger) {
-	flashColor(client, log, flashGreenXY, "idle flash")
+// FlashIdle blinks the TV-controlled Ambilight bulbs green flashCount times and
+// leaves them off — the idle-off indicator. When the TV is switched off it simply
+// stops sending its REST light-state writes (there is no off signal), so those
+// lights would otherwise stay frozen on their last Ambilight color. The idle
+// monitor (see cmd/relume) calls this once the writes have gone silent for the
+// timeout. targetUUIDs scopes it to the Ambilight bulbs only — never the rest of
+// the home.
+func FlashIdle(client proClient, log *slog.Logger, targetUUIDs []string) {
+	flashColor(client, log, flashGreenXY, "idle flash", targetUUIDs)
 }
 
-// flashColor blinks all Bridge Pro lights with the given CIE-xy color flashCount
-// times and leaves them off. It uses its own client and a direct, deliberate
-// sequence (not the coalescing control path) and runs synchronously (~0.7s). On
-// an unreachable Bridge Pro the initial read fails and it is a no-op. logPrefix
-// labels the warnings for the calling indicator.
-func flashColor(client proClient, log *slog.Logger, colorXY []any, logPrefix string) {
-	lights, err := client.Lights()
-	if err != nil {
+// flashColor blinks the given Bridge Pro light UUIDs with the CIE-xy color
+// flashCount times and leaves them off. It uses its own client and a direct,
+// deliberate sequence (not the coalescing control path) and runs synchronously
+// (~0.7s). With no target UUIDs (the Ambilight set is not known yet — e.g. a
+// first start before the TV has driven any light) it is a no-op rather than
+// touching the whole home. logPrefix labels the warnings for the calling indicator.
+func flashColor(client proClient, log *slog.Logger, colorXY []any, logPrefix string, targetUUIDs []string) {
+	if len(targetUUIDs) == 0 {
 		if log != nil {
-			log.Warn(logPrefix+": reading lights", "err", err)
+			log.Info(logPrefix + ": no controlled Ambilight lights known yet — skipping (not touching other lights)")
 		}
-		return
-	}
-	if len(lights) == 0 {
 		return
 	}
 
 	on := translate.StateV1ToV2(map[string]any{"on": true, "xy": colorXY, "bri": 254})
 	off := translate.StateV1ToV2(map[string]any{"on": false})
 	set := func(body map[string]any) {
-		for _, l := range lights {
-			if serr := client.SetLight(l.ID, body); serr != nil && log != nil {
-				log.Warn(logPrefix+": setting light", "id", l.ID, "err", serr)
+		for _, uuid := range targetUUIDs {
+			if serr := client.SetLight(uuid, body); serr != nil && log != nil {
+				log.Warn(logPrefix+": setting light", "uuid", uuid, "err", serr)
 			}
 		}
 	}
