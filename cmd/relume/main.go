@@ -146,9 +146,15 @@ func runServe(args []string, log *slog.Logger) error {
 	log.Info("relume", "version", version)
 	log.Info("identity", "serial", cfg.Identity.Serial, "bridgeid", cfg.Identity.BridgeID(), "advertise", ip)
 
+	// entProbe enables the entertainment diagnostic (RELUME_ENT_PROBE=1): confirm
+	// the TV's stream activation and observe whether it then opens a DTLS stream on
+	// udp :2100 — without the -debug per-request flood. See AGENTS.md / diag.
+	entProbe := os.Getenv("RELUME_ENT_PROBE") != ""
+
 	clip := clipv1.New(cfg, ip, opts.httpPort, log)
 	clip.Debug = opts.debug
 	clip.TVIP = opts.tvIP
+	clip.EntProbe = entProbe
 	clip.IdentityProfile = opts.identityProfile
 	clip.DescriptionProfile = opts.descriptionProfile
 	clip.MediaServerAlias = opts.ssdpMediaServerAlias
@@ -193,8 +199,25 @@ func runServe(args []string, log *slog.Logger) error {
 	}
 
 	// Summarize the high-frequency Ambilight light-state writes periodically
-	// instead of logging every single request.
-	go clip.LogActivitySummary(ctx, 30*time.Second)
+	// instead of logging every single request. The probe shortens the window to
+	// surface the update-rate (Hz) reading sooner during a diagnostic run.
+	activityWindow := 30 * time.Second
+	if entProbe {
+		activityWindow = 10 * time.Second
+	}
+	go clip.LogActivitySummary(ctx, activityWindow)
+
+	// Passively observe the entertainment DTLS port (udp :2100): does the TV try
+	// to stream after activating the entertainment group? Probe-only; never sends.
+	if entProbe {
+		probe := diag.NewEntertainmentProbe(ip, log)
+		log.Info("entertainment probe active (RELUME_ENT_PROBE): confirming stream activation + watching udp :2100")
+		go func() {
+			if err := probe.Run(ctx); err != nil && ctx.Err() == nil {
+				log.Warn("entertainment probe", "err", err)
+			}
+		}()
+	}
 
 	// Detect the TV going silent (switched off / control session broke) and flash
 	// the lights green twice, then off — the TV sends no off signal, it just stops

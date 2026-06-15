@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"io"
 	"log/slog"
+	"math"
 	"net"
 	"net/http"
 	"os"
@@ -58,12 +59,29 @@ type Server struct {
 	// identified by this IP or by the Android/Dalvik Philips-TV User-Agent.
 	TVIP string
 
+	// EntProbe enables the entertainment diagnostic (RELUME_ENT_PROBE=1): the TV's
+	// stream-activation PUT is confirmed with the real v1 success shape and the
+	// Entertainment group reflects stream.active+owner, so the TV proceeds to open
+	// the DTLS stream instead of aborting — letting the udp :2100 probe observe
+	// whether it tries DTLS at all. Off keeps the legacy log-and-ack behavior.
+	EntProbe bool
+
 	// activity accumulates the high-frequency light-state writes Ambilight sends
 	// (REST control path) so they can be summarized periodically instead of
 	// logging every single request. See LogActivitySummary.
 	activityMu    sync.Mutex
 	lightWrites   uint64
 	lightsTouched map[string]struct{}
+	// groupActionWrites counts PUT /groups/{id}/action writes — a second control
+	// path the TV could push Ambilight frames over. Tallied so the activity Hz
+	// reading cannot be faked out by frames arriving on the group endpoint.
+	groupActionWrites uint64
+
+	// stream tracks the Entertainment group's stream state under EntProbe so GET
+	// /groups/1 reflects the activation the TV requested (active + owner).
+	streamMu     sync.Mutex
+	streamActive bool
+	streamOwner  string
 	// lastWriteAt is the time of the most recent Ambilight light-state write,
 	// stamped in handleSetLightState (so it is independent of Debug, unlike the
 	// activity counters above). The idle-off monitor reads it via LastActivity.
@@ -175,6 +193,10 @@ func (s *Server) logRequests(next http.Handler) http.Handler {
 			// REST path; logging each one floods the log. Accumulate and let
 			// LogActivitySummary emit a periodic rollup instead.
 			s.recordLightWrite(id)
+		} else if isGroupActionWrite(r) {
+			// The group-action path is the other high-frequency control route;
+			// accumulate it too so it does not flood and shows up in the Hz rollup.
+			s.recordGroupActionWrite()
 		} else {
 			s.log.Info("http", "method", r.Method, "path", r.URL.Path, "from", r.RemoteAddr)
 		}
@@ -203,12 +225,27 @@ func lightStateWriteID(r *http.Request) (string, bool) {
 	return id, true
 }
 
+// isGroupActionWrite reports whether r is a PUT /api/{user}/groups/{id}/action —
+// the group-based high-frequency control path (alternative to per-light writes).
+func isGroupActionWrite(r *http.Request) bool {
+	return r.Method == http.MethodPut &&
+		strings.Contains(r.URL.Path, "/groups/") &&
+		strings.HasSuffix(r.URL.Path, "/action")
+}
+
 // recordLightWrite accumulates one Ambilight light-state write for the periodic
 // summary emitted by LogActivitySummary.
 func (s *Server) recordLightWrite(id string) {
 	s.activityMu.Lock()
 	s.lightWrites++
 	s.lightsTouched[id] = struct{}{}
+	s.activityMu.Unlock()
+}
+
+// recordGroupActionWrite accumulates one group-action write for the summary.
+func (s *Server) recordGroupActionWrite() {
+	s.activityMu.Lock()
+	s.groupActionWrites++
 	s.activityMu.Unlock()
 }
 
@@ -269,18 +306,39 @@ func (s *Server) LogActivitySummary(ctx context.Context, interval time.Duration)
 // resets the counters. window is the period the counts cover.
 func (s *Server) flushActivity(window time.Duration) {
 	s.activityMu.Lock()
-	writes, lights := s.lightWrites, len(s.lightsTouched)
+	writes, groupWrites, lights := s.lightWrites, s.groupActionWrites, len(s.lightsTouched)
 	s.lightWrites = 0
+	s.groupActionWrites = 0
 	s.lightsTouched = map[string]struct{}{}
 	s.activityMu.Unlock()
-	if writes > 0 {
-		s.log.Info("ambilight activity",
-			"light_state_writes", writes,
-			"lights", lights,
-			"window", window.String(),
-		)
+	total := writes + groupWrites
+	if total == 0 {
+		return
 	}
+	// total_hz / per_light_hz turn the raw counts into the update rate — the
+	// telltale for the lag: ~25 Hz means the TV streams fast (so the bottleneck is
+	// forwarding to the Pro), ~1-2 Hz means it is stuck in the slow REST fallback.
+	secs := window.Seconds()
+	perLightHz := 0.0
+	if lights > 0 && secs > 0 {
+		perLightHz = float64(writes) / float64(lights) / secs
+	}
+	totalHz := 0.0
+	if secs > 0 {
+		totalHz = float64(total) / secs
+	}
+	s.log.Info("ambilight activity",
+		"light_state_writes", writes,
+		"group_action_writes", groupWrites,
+		"lights", lights,
+		"window", window.String(),
+		"total_hz", round1(totalHz),
+		"per_light_hz", round1(perLightHz),
+	)
 }
+
+// round1 rounds to one decimal for readable Hz figures in the activity log.
+func round1(v float64) float64 { return math.Round(v*10) / 10 }
 
 type statusRecorder struct {
 	http.ResponseWriter
@@ -542,17 +600,30 @@ func (s *Server) handleGroups(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, map[string]any{
-		"0": bridgeGroup("0"),
-		"1": bridgeGroup("1"),
+		"0": s.bridgeGroup("0"),
+		"1": s.bridgeGroup("1"),
 	})
 }
 
-func bridgeGroup(id string) map[string]any {
+func (s *Server) bridgeGroup(id string) map[string]any {
 	groupType := "Entertainment"
 	name := "Relume Entertainment"
 	if id == "0" {
 		groupType = "LightGroup"
 		name = "Group 0"
+	}
+	// Default: inactive stream. Under the entertainment probe, reflect the
+	// activation the TV requested so it treats the stream as live and proceeds to
+	// open the DTLS connection (which the :2100 probe then observes).
+	var streamActive bool
+	var streamOwner any
+	if s.EntProbe && id == "1" {
+		s.streamMu.Lock()
+		streamActive = s.streamActive
+		if s.streamOwner != "" {
+			streamOwner = s.streamOwner
+		}
+		s.streamMu.Unlock()
 	}
 	return map[string]any{
 		"name":   name,
@@ -561,8 +632,8 @@ func bridgeGroup(id string) map[string]any {
 		"state":  map[string]any{"all_on": false, "any_on": false},
 		"action": map[string]any{},
 		"stream": map[string]any{
-			"active":    false,
-			"owner":     nil,
+			"active":    streamActive,
+			"owner":     streamOwner,
 			"proxymode": "auto",
 			"proxynode": "/bridge",
 		},
@@ -578,7 +649,7 @@ func (s *Server) handleGroup(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 3, "/groups/"+id, "resource, /groups/"+id+", not available")
 		return
 	}
-	writeJSON(w, bridgeGroup(id))
+	writeJSON(w, s.bridgeGroup(id))
 }
 
 func (s *Server) handleCreateGroup(w http.ResponseWriter, r *http.Request) {
@@ -586,7 +657,17 @@ func (s *Server) handleCreateGroup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	body, _ := io.ReadAll(r.Body)
-	s.log.Info("group create (not yet persisted)", "body", string(body))
+	if s.EntProbe {
+		var g struct {
+			Type string `json:"type"`
+			Name string `json:"name"`
+		}
+		_ = json.Unmarshal(body, &g)
+		s.log.Info("ENTERTAINMENT group create requested by TV",
+			"type", g.Type, "name", g.Name, "body", string(body))
+	} else {
+		s.log.Info("group create (not yet persisted)", "body", string(body))
+	}
 	writeJSON(w, []map[string]any{{"success": map[string]any{"id": "1"}}})
 }
 
@@ -606,6 +687,12 @@ func (s *Server) handleGroupAction(w http.ResponseWriter, r *http.Request) {
 // handleGroupUpdate intercepts, among other things, the stream activation
 // (PUT /groups/{id} with {"stream":{"active":true}}) — the entry into the
 // entertainment path (M4).
+//
+// Under the entertainment probe, a stream-activation PUT is confirmed with the
+// real v1 success shape ([{"success":{"/groups/1/stream/active":true}}]) and the
+// group's stream state is updated, so the TV treats activation as accepted and
+// goes on to open the DTLS stream (which the :2100 probe observes). Without the
+// probe the legacy log-and-ack behavior is kept.
 func (s *Server) handleGroupUpdate(w http.ResponseWriter, r *http.Request) {
 	if !s.authorized(w, r) {
 		return
@@ -613,7 +700,42 @@ func (s *Server) handleGroupUpdate(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	body, _ := io.ReadAll(r.Body)
 	s.log.Info("group update", "group", id, "body", string(body))
+
+	if s.EntProbe {
+		if active, ok := streamActiveFromBody(body); ok {
+			owner := r.PathValue("user")
+			s.streamMu.Lock()
+			s.streamActive = active
+			if active {
+				s.streamOwner = owner
+			} else {
+				s.streamOwner = ""
+			}
+			s.streamMu.Unlock()
+			s.log.Info("ENTERTAINMENT stream activation requested by TV",
+				"group", id, "active", active, "owner", owner)
+			writeJSON(w, []map[string]any{{"success": map[string]any{
+				"/groups/" + id + "/stream/active": active,
+			}}})
+			return
+		}
+	}
 	writeJSON(w, []map[string]any{{"success": map[string]any{"/groups/" + id: "ok"}}})
+}
+
+// streamActiveFromBody extracts stream.active from a group-update body. The bool
+// return is the requested value; ok is false when the body carries no stream
+// field (an ordinary group update, not a stream activation).
+func streamActiveFromBody(body []byte) (active, ok bool) {
+	var req struct {
+		Stream *struct {
+			Active *bool `json:"active"`
+		} `json:"stream"`
+	}
+	if err := json.Unmarshal(body, &req); err != nil || req.Stream == nil || req.Stream.Active == nil {
+		return false, false
+	}
+	return *req.Stream.Active, true
 }
 
 func (s *Server) handleCapabilities(w http.ResponseWriter, r *http.Request) {
