@@ -16,8 +16,8 @@ type flashFake struct {
 }
 
 type flashStep struct {
-	on  bool
-	red bool
+	on      bool
+	colored bool
 }
 
 func (f *flashFake) Lights() ([]bridgepro.Light, error) { return f.lights, nil }
@@ -27,12 +27,12 @@ func (f *flashFake) SetLight(_ string, body map[string]any) error {
 	onVal, _ := on["on"].(bool)
 	_, hasColor := body["color"]
 	f.mu.Lock()
-	f.steps = append(f.steps, flashStep{on: onVal, red: hasColor})
+	f.steps = append(f.steps, flashStep{on: onVal, colored: hasColor})
 	f.mu.Unlock()
 	return nil
 }
 
-func TestFlashRestart_blinksRedTwiceThenOff(t *testing.T) {
+func TestFlashRestart_blinksGreenThreeTimesThenOff(t *testing.T) {
 	// Given: a single light and near-instant blink timings
 	defer withFastFlash()()
 	fc := &flashFake{lights: []bridgepro.Light{{ID: "uuid-1"}}}
@@ -40,8 +40,12 @@ func TestFlashRestart_blinksRedTwiceThenOff(t *testing.T) {
 	// When
 	FlashRestart(fc, nil, []string{"uuid-1"})
 
-	// Then: on(red), off, on(red), off — two red blinks ending off
-	want := []flashStep{{on: true, red: true}, {on: false}, {on: true, red: true}, {on: false}}
+	// Then: on(color), off ×3 — three blinks ending off
+	want := []flashStep{
+		{on: true, colored: true}, {on: false},
+		{on: true, colored: true}, {on: false},
+		{on: true, colored: true}, {on: false},
+	}
 	fc.mu.Lock()
 	got := fc.steps
 	fc.mu.Unlock()
@@ -51,6 +55,28 @@ func TestFlashRestart_blinksRedTwiceThenOff(t *testing.T) {
 	for i := range want {
 		if got[i] != want[i] {
 			t.Fatalf("step %d = %+v, want %+v", i, got[i], want[i])
+		}
+	}
+}
+
+func TestFlashRestart_usesGreen(t *testing.T) {
+	// Given
+	defer withFastFlash()()
+	cf := &colorFake{}
+
+	// When
+	FlashRestart(cf, nil, []string{"uuid-1"})
+
+	// Then: three on-writes, each the green primary's x (0.217), never red
+	cf.mu.Lock()
+	xs := cf.xs
+	cf.mu.Unlock()
+	if len(xs) != restartFlashCount {
+		t.Fatalf("color writes = %d, want %d", len(xs), restartFlashCount)
+	}
+	for _, x := range xs {
+		if x != 0.217 {
+			t.Fatalf("restart flash color x = %v, want green 0.217", x)
 		}
 	}
 }
@@ -135,7 +161,7 @@ func TestFlashIdle_blinksGreenTwiceThenOff(t *testing.T) {
 	FlashIdle(fc, nil, []string{"uuid-1"})
 
 	// Then: on(color), off, on(color), off — two blinks ending off
-	want := []flashStep{{on: true, red: true}, {on: false}, {on: true, red: true}, {on: false}}
+	want := []flashStep{{on: true, colored: true}, {on: false}, {on: true, colored: true}, {on: false}}
 	fc.mu.Lock()
 	got := fc.steps
 	fc.mu.Unlock()
@@ -161,8 +187,8 @@ func TestFlashIdle_usesGreenNotRed(t *testing.T) {
 	cf.mu.Lock()
 	xs := cf.xs
 	cf.mu.Unlock()
-	if len(xs) != flashCount {
-		t.Fatalf("color writes = %d, want %d", len(xs), flashCount)
+	if len(xs) != idleFlashCount {
+		t.Fatalf("color writes = %d, want %d", len(xs), idleFlashCount)
 	}
 	for _, x := range xs {
 		if x != 0.217 {
