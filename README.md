@@ -13,13 +13,20 @@ A software bridge that connects a **Philips Ambilight TV** to a **Hue Bridge Pro
 > side by side is finicky by Philips' own design, so expect rough edges. Use it at
 > your own risk; no support, no warranty, no guarantees.
 
-## What it does
+## The problem
 
-The Hue **Bridge Pro (BSB003)** dropped the discovery and API surface that the TV's Ambilight+Hue
-feature expects, so the TV can no longer pair with it directly. Relume sits in between: to the TV
-it impersonates an old gen-2 bridge (BSB002) speaking the v1 HTTP API, and it proxies every
-request to the real Bridge Pro over HTTPS/CLIP v2. See [docs/DESIGN.md](docs/DESIGN.md) for
-identity, pairing, and the two control modes.
+A Philips Ambilight TV's built-in Ambilight+Hue feature mirrors the on-screen colours onto your
+Hue lights by pairing with the bridge. The new Hue **Bridge Pro (BSB003)** dropped the discovery
+paths and v1 HTTP API surface that feature expects, so the TV can no longer find or pair with it
+directly — and because Philips Hue (Signify) and the TV division (TP Vision) don't coordinate,
+there is no official fix.
+
+## What this does
+
+Relume sits between the TV and the Bridge Pro: to the TV it impersonates an old gen-2 bridge
+(BSB002) speaking the v1 HTTP API, and it proxies every request to the real Bridge Pro over
+HTTPS/CLIP v2. See [docs/DESIGN.md](docs/DESIGN.md) for identity, pairing, and the two control
+modes.
 
 ## Requirements
 
