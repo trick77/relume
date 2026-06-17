@@ -1,4 +1,4 @@
-<p align="center">
+<p align="left">
   <img src="docs/relume.png" alt="relume" width="140">
 </p>
 
