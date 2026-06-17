@@ -88,41 +88,14 @@ Expected signals:
 - **SSDP:** relume logs the TV M-SEARCH and responds immediately; tcpdump shows a follow-up
   `GET /description.xml`.
 
-## Experimental discovery flags
-
-These are debugging knobs for the unsolved coexistence/discovery problem, not user features. They
-change relume's wire identity or descriptor behaviour so a single capture can test a hypothesis.
-
-| Flag | Effect |
-|------|--------|
-| `-identity-profile ambilight` \| `hass` | Switch the SSDP `SERVER` header and `description.xml` manufacturer fields to the Ambilight-OSS or Home Assistant emulated-hue shape. |
-| `-description-profile ambilight-reference` | Keep the same identity but match `description.xml` formatting / friendlyName to the Ambilight OSS bridge more closely. |
-| `-ssdp-media-server-alias` | Actively broadcast a `MediaServer:1` SSDP NOTIFY and answer `MediaServer:1` M-SEARCH with a cache-busted `LOCATION: /description.xml?relume=ms1`. Only that URL serves `deviceType=MediaServer:1`. |
-| `-ssdp-media-server-basic-body` | Keep the `?relume=ms1` MediaServer alias URL the TV follows, but serve a Hue Basic descriptor body from it (tests whether the TV rejects the MediaServer descriptor *type*). |
-| `-ssdp-descriptor-variants` | Add an extra query-scoped `/description.xml?relume=basic1` SSDP location for one-scan descriptor-body experiments (use with `-ssdp-media-server-alias`). |
-
-Example combinations:
-
-```bash
-# Home Assistant emulated-hue identity:
-relume serve -debug -advertise-ip <nas-lan-ip> -tv-ip <tv-ip> \
-  -discovery-burst-duration 90s -discovery-burst-interval 1s -identity-profile hass
-
-# If the TV only emits MediaServer:1 SSDP traffic, also try the SSDP alias:
-relume serve -debug -advertise-ip <nas-lan-ip> -tv-ip <tv-ip> \
-  -discovery-burst-duration 90s -discovery-burst-interval 1s \
-  -identity-profile hass -ssdp-media-server-alias
-
-# Match the OSS descriptor body and keep the MediaServer trigger:
-relume serve -debug -advertise-ip <nas-lan-ip> -tv-ip <tv-ip> \
-  -identity-profile ambilight -description-profile ambilight-reference \
-  -ssdp-media-server-alias -ssdp-media-server-basic-body
-```
-
 ## Experiment history
 
 Each row is a hypothesis tested against the real TV. None has reached `POST /api` with a
-powered-on Pro yet.
+powered-on Pro yet. The experimental identity/descriptor flags named in the rows below
+(`-identity-profile`, `-description-profile`, `-ssdp-media-server-alias`,
+`-ssdp-media-server-basic-body`, `-ssdp-descriptor-variants`) have since been removed: once
+the confirmed-working identity (mDNS `BSB002`, `description.xml` served as `text/xml`,
+register-once) was established, the knobs were no longer needed.
 
 | Version | Variation | Result |
 |---------|-----------|--------|

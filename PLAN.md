@@ -145,23 +145,10 @@ problem — see Discovery finding below and `docs/TROUBLESHOOTING.md`.)
   the TV is in Ambilight+Hue scan mode.
 - `-debug -tv-ip <tv-ip>` logs every mDNS question from the TV, not only Hue-looking names.
   This separates active mDNS discovery from passive listening.
-- `-identity-profile hass` switches the SSDP `SERVER` header and `description.xml`
-  manufacturer fields to the Home Assistant emulated-hue shape. Public issue reports show
-  Philips TVs accepting hass-emulated-hue even where diyHue discovery is unreliable.
-- `-ssdp-media-server-alias` is an opt-in experiment for the measured Android TV behavior:
-  it actively broadcasts a `MediaServer:1` SSDP NOTIFY and answers `MediaServer:1` M-SEARCH
-  with cache-busted `LOCATION: /description.xml?relume=ms1` and `max-age=1`. Only that query
-  URL serves `deviceType=MediaServer:1`; plain `/description.xml` remains Hue Basic for the mDNS path.
-- `-ssdp-descriptor-variants` adds `LOCATION: /description.xml?relume=basic1` under the
-  same `MediaServer:1` ST/NT. That URL still serves `deviceType=Basic:1`. It tests whether
-  the TV follows the MediaServer SSDP trigger but rejects the MediaServer descriptor body.
-- `-description-profile ambilight-reference` keeps the same discovery identity but changes
-  `description.xml` formatting/friendlyName to match the active Ambilight OSS bridge more
-  closely. It tests whether the TV parses then rejects relume's descriptor before starting
-  CLIP v1 pairing.
-- `-ssdp-media-server-basic-body` keeps the MediaServer SSDP trigger and the `?relume=ms1`
-  URL that the TV actually follows, but serves a Hue Basic descriptor body from that URL.
-  It tests whether the TV rejects the MediaServer descriptor type before starting CLIP v1 pairing.
+- The experimental identity/descriptor flags (`-identity-profile`, `-description-profile`,
+  `-ssdp-media-server-alias`, `-ssdp-media-server-basic-body`, `-ssdp-descriptor-variants`)
+  have been removed. The confirmed-working identity (mDNS `BSB002`, `description.xml` as
+  `text/xml`, register-once) is now the default and needs no knobs.
 - The real Bridge Pro itself announces `_hue._tcp` as `Hue Bridge - XXXXXX` / `modelid=BSB003`;
   the TV likely filters BSB003 out. relume announces `Philips Hue - XXXXXX` / `modelid=BSB002`.
 - UDP 10102 broadcasts from the TV are DTS Play-Fi (audio) — a red herring, unrelated to Hue.
@@ -199,8 +186,8 @@ register-once in `internal/mdns/announce.go`.
   `relume serve -debug -advertise-ip <nas-lan-ip> -tv-ip <tv-ip>
   -discovery-burst-duration 90s -discovery-burst-interval 1s` and
   `tcpdump -ni <iface> 'host <tv-ip> or udp port 5353 or udp port 1900 or tcp port 80'`.
-  If the default identity is ignored, repeat with `-identity-profile ambilight`; if the TV
-  fetches the MediaServer alias but still stops, add `-ssdp-descriptor-variants`.
+  The default identity (mDNS `BSB002` / `text/xml` descriptor / register-once) is the
+  confirmed-working one; the former experimental identity/descriptor flags have been removed.
 - Exact `HueStream` v2 layout (52-byte header, channel chunks).
 - Exact CLIP v2 calls to create/activate the `entertainment_configuration` on the Pro.
 - Whether the TV requires a specific `swversion`/`apiversion` to attempt Entertainment.

@@ -93,8 +93,8 @@ State (bridge identity, TV tokens, **Bridge Pro app key + client key**) lives in
 - **`-skip-tls-verify`** &nbsp;·&nbsp; default off — Skip Bridge Pro certificate pinning (fallback).
 - **`-debug`** &nbsp;·&nbsp; default off — SSDP/HTTP diagnostics + mDNS observer.
 
-Discovery-debugging flags (`-identity-profile`, `-ssdp-*`, `-description-profile`,
-`-discovery-burst-*`) are documented in [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md).
+Discovery-debugging flags (`-discovery-burst-*`) are documented in
+[docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md).
 
 ## Troubleshooting
 

@@ -658,9 +658,15 @@ func (s *Server) handleCreateGroup(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, []map[string]any{{"success": map[string]any{"id": "1"}}})
 }
 
-// handleGroupAction is the groups REST path. Full group/entertainment support
-// follows in M4; for now the request is logged and acknowledged so that the TV
-// does not abort.
+// handleGroupAction is the groups REST path (PUT /api/{user}/groups/{id}/action).
+// The request is logged and acknowledged but deliberately NOT forwarded to the Pro.
+// Dropping group-action writes is intentional and safe for the target Ambilight TV:
+// the measured TV drives lights exclusively via per-light PUT /lights/{id}/state, so
+// it never relies on the group-action path. Per-light forwarding is the supported
+// control path. The recordGroupActionWrite tally (incremented in the request
+// middleware, not here) exists precisely to surface the group-action path being
+// exercised unexpectedly — if that counter ever moves on a real TV, the assumption
+// above no longer holds and this handler must forward.
 func (s *Server) handleGroupAction(w http.ResponseWriter, r *http.Request) {
 	if !s.authorized(w, r) {
 		return

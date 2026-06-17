@@ -22,9 +22,7 @@ All repo content (docs, code comments, logs) is English.
   queue (503). A relume restart mid-stream orphans the TV's session: toggle Ambilight (not
   Ambilight+Hue) on the TV to reconnect.
 - env diagnostics (no -debug flood): `RELUME_GAP_TRACE=1` logs inter-write gaps (idle-off
-  calibration). `RELUME_ENT_PROBE=1` = passive entertainment probe (REST mode, never sends DTLS):
-  confirms activation + watches udp :2100 for the TV's ClientHello; superseded by `-mode
-  entertainment`. grep `ENTERTAINMENT` / `ambilight activity`.
+  calibration). grep `ENTERTAINMENT` / `ambilight activity`.
 - commands: `serve` (default), `setup` (manual Pro pair — optional), `discover` (cloud), `avahi-service`, `version`
 - pairing is auto-accepted (no link button, no UI) — but ONLY for the TV (source IP == `-tv-ip`, or
   the Android/Dalvik Philips-TV User-Agent); other LAN devices get error 101. POST /api is
