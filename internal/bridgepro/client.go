@@ -10,6 +10,7 @@ import (
 	"crypto/x509"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -20,6 +21,43 @@ import (
 )
 
 const appKeyHeader = "hue-application-key"
+
+// Error taxonomy for the Bridge Pro client. Callers (e.g. watchPro) use
+// errors.Is to distinguish error classes and react accordingly:
+var (
+	// ErrUnreachable means the HTTP round-trip itself failed: httpClient.Do
+	// returned a non-nil error (connection refused, timeout, DNS, TLS handshake
+	// or certificate-pin mismatch). The Pro should be re-discovered / re-pinned.
+	ErrUnreachable = errors.New("bridge pro unreachable")
+	// ErrQueueFull means the Pro answered HTTP 503: its command queue is full
+	// under load. The Pro is reachable; the caller should back off, NOT
+	// re-discover or re-pin.
+	ErrQueueFull = errors.New("bridge pro command queue full")
+	// ErrDomain means the HTTP response was OK (2xx, including 207 multi-status)
+	// but the CLIP v2 body carried a non-empty errors[] array (e.g. a CT-only
+	// light rejecting color.xy). This is a per-attribute domain rejection, not a
+	// connectivity problem.
+	ErrDomain = errors.New("bridge pro domain error")
+)
+
+// decodeCLIPErrors best-effort decodes the CLIP v2 {"errors":[{"description":...}]}
+// shape from a response body and, if errors[] is non-empty, returns an
+// ErrDomain-wrapped error including the first description. A body that fails to
+// unmarshal yields no domain error (nil) — the decode is deliberately lenient.
+func decodeCLIPErrors(raw []byte) error {
+	var out struct {
+		Errors []struct {
+			Description string `json:"description"`
+		} `json:"errors"`
+	}
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return nil
+	}
+	if len(out.Errors) > 0 {
+		return fmt.Errorf("%s: %w", out.Errors[0].Description, ErrDomain)
+	}
+	return nil
+}
 
 // Client talks to a Hue Bridge Pro.
 type Client struct {
@@ -142,9 +180,13 @@ func (c *Client) get(path string, v any) error {
 	req.Header.Set(appKeyHeader, c.appKey)
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return fmt.Errorf("GET %s: %w", path, err)
+		return fmt.Errorf("GET %s: %w", path, errors.Join(err, ErrUnreachable))
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusServiceUnavailable {
+		b, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("GET %s: status %d: %s: %w", path, resp.StatusCode, string(b), ErrQueueFull)
+	}
 	if resp.StatusCode != http.StatusOK {
 		b, _ := io.ReadAll(resp.Body)
 		return fmt.Errorf("GET %s: status %d: %s", path, resp.StatusCode, string(b))
@@ -162,26 +204,28 @@ func (c *Client) post(path string, payload any) (string, error) {
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("POST %s: %w", path, err)
+		return "", fmt.Errorf("POST %s: %w", path, errors.Join(err, ErrUnreachable))
 	}
 	defer resp.Body.Close()
 	raw, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode == http.StatusServiceUnavailable {
+		return "", fmt.Errorf("POST %s: status %d: %s: %w", path, resp.StatusCode, string(raw), ErrQueueFull)
+	}
 	if resp.StatusCode >= 400 {
 		return "", fmt.Errorf("POST %s: status %d: %s", path, resp.StatusCode, string(raw))
 	}
+	// Best-effort domain-error check (consistent with put/del).
+	if derr := decodeCLIPErrors(raw); derr != nil {
+		return "", fmt.Errorf("POST %s: %w", path, derr)
+	}
+	// post additionally requires the rid; this decode hard-errors.
 	var out struct {
-		Errors []struct {
-			Description string `json:"description"`
-		} `json:"errors"`
 		Data []struct {
 			RID string `json:"rid"`
 		} `json:"data"`
 	}
 	if err := json.Unmarshal(raw, &out); err != nil {
 		return "", fmt.Errorf("POST %s: decode response: %w", path, err)
-	}
-	if len(out.Errors) > 0 {
-		return "", fmt.Errorf("POST %s: %s", path, out.Errors[0].Description)
 	}
 	if len(out.Data) == 0 {
 		return "", fmt.Errorf("POST %s: no resource id returned", path)
@@ -200,21 +244,19 @@ func (c *Client) put(path string, payload any) error {
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return fmt.Errorf("PUT %s: %w", path, err)
+		return fmt.Errorf("PUT %s: %w", path, errors.Join(err, ErrUnreachable))
 	}
 	defer resp.Body.Close()
 	raw, _ := io.ReadAll(resp.Body)
 
+	if resp.StatusCode == http.StatusServiceUnavailable {
+		return fmt.Errorf("PUT %s: status %d: %s: %w", path, resp.StatusCode, string(raw), ErrQueueFull)
+	}
 	if resp.StatusCode >= 400 {
 		return fmt.Errorf("PUT %s: status %d: %s", path, resp.StatusCode, string(raw))
 	}
-	var out struct {
-		Errors []struct {
-			Description string `json:"description"`
-		} `json:"errors"`
-	}
-	if err := json.Unmarshal(raw, &out); err == nil && len(out.Errors) > 0 {
-		return fmt.Errorf("PUT %s: %s", path, out.Errors[0].Description)
+	if derr := decodeCLIPErrors(raw); derr != nil {
+		return fmt.Errorf("PUT %s: %w", path, derr)
 	}
 	return nil
 }
@@ -227,20 +269,18 @@ func (c *Client) del(path string) error {
 	req.Header.Set(appKeyHeader, c.appKey)
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return fmt.Errorf("DELETE %s: %w", path, err)
+		return fmt.Errorf("DELETE %s: %w", path, errors.Join(err, ErrUnreachable))
 	}
 	defer resp.Body.Close()
 	raw, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode == http.StatusServiceUnavailable {
+		return fmt.Errorf("DELETE %s: status %d: %s: %w", path, resp.StatusCode, string(raw), ErrQueueFull)
+	}
 	if resp.StatusCode >= 400 {
 		return fmt.Errorf("DELETE %s: status %d: %s", path, resp.StatusCode, string(raw))
 	}
-	var out struct {
-		Errors []struct {
-			Description string `json:"description"`
-		} `json:"errors"`
-	}
-	if err := json.Unmarshal(raw, &out); err == nil && len(out.Errors) > 0 {
-		return fmt.Errorf("DELETE %s: %s", path, out.Errors[0].Description)
+	if derr := decodeCLIPErrors(raw); derr != nil {
+		return fmt.Errorf("DELETE %s: %w", path, derr)
 	}
 	return nil
 }
