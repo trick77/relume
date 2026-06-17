@@ -1,9 +1,47 @@
 # Troubleshooting
 
-For the common operational issues (cloud suppression, avahi, rootless port 80, entertainment
-reconnect) see the **Troubleshooting** section in the [README](../README.md). This document
-covers the harder, developer-facing problem: getting the TV to discover relume in the first
-place.
+This guide covers two things: the everyday operational issues below, and the harder,
+developer-facing problem further down — getting the TV to discover relume in the first place.
+The [README](../README.md) has a one-paragraph summary of the single most common blocker.
+
+## Common operational issues
+
+### Entertainment stream: re-trigger after a relume restart
+In `-mode entertainment` the TV — not relume — opens the DTLS stream, and only after relume
+confirms its stream activation. Restarting the relume container mid-session orphans that session:
+the TV falls back to polling `GET /api/{user}/lights/1` without re-creating the entertainment
+group, so the lights go idle (and the idle-off monitor turns them off).
+
+To reconnect, **toggle Ambilight off and on again on the TV** (the Ambilight feature itself —
+*not* Ambilight+Hue). The TV then re-runs the activation handshake. Confirm in the log:
+```
+ENTERTAINMENT group create requested by TV ...
+ENTERTAINMENT stream activation requested by TV ... active=true
+entertainment stream connected from=<tv-ip>:...
+```
+
+### Cloud suppression
+If a real Hue bridge is registered at `discovery.meethue.com`, the TV may resolve it via the
+cloud and **skip local discovery** (diyHue #988). Disconnect or block the original bridge for at
+least 30 seconds before scanning. Check with `curl https://discovery.meethue.com/` from the TV's
+network; the clean local-discovery state is `[]`.
+
+### mDNS conflict with avahi
+If the host runs an `avahi-daemon` (it owns UDP 5353), relume's built-in mDNS announcer cannot
+bind the port. Either let avahi announce instead:
+```bash
+docker compose run --rm relume avahi-service -config /data/relume.json > /etc/avahi/services/relume-hue.service
+# match the port to the serve http-port: relume avahi-service -http-port 80
+```
+or disable `avahi-daemon`, then relume's own announcer works.
+
+### Rootless Docker and port 80
+A real bridge speaks on port 80. Under **rootless** Docker, ports <1024 require a host sysctl:
+```bash
+sudo sysctl net.ipv4.ip_unprivileged_port_start=80   # do NOT run the container as root
+```
+Alternatively use a high port (`-http-port 8080`) — works as long as the TV honors the port
+advertised via mDNS (to be verified).
 
 ## Discovery: the hard part
 
