@@ -65,6 +65,15 @@ func (h *Hub) Snapshot() Snapshot {
 	return h.snap
 }
 
+// hasSubscribers reports whether any SSE client is currently connected. The
+// snapshot loop uses this to avoid polling state (and the Bridge Pro) when no
+// browser is watching.
+func (h *Hub) hasSubscribers() bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return len(h.subs) > 0
+}
+
 // Events returns a copy of the buffered events, oldest first.
 func (h *Hub) Events() []Event {
 	h.mu.Lock()

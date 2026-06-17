@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"log/slog"
 	"net/http"
+	"sync/atomic"
 	"time"
 )
 
@@ -23,6 +24,7 @@ type Server struct {
 	log          *slog.Logger
 	http         *http.Server
 	snapInterval time.Duration
+	flashing     atomic.Bool
 }
 
 // NewServer builds the UI server. flash may be nil, which disables the action.
@@ -47,7 +49,12 @@ func (s *Server) runSnapshotLoop(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-t.C:
-			s.hub.SetSnapshot(BuildSnapshot(s.src))
+			// Skip when no browser is connected: BuildSnapshot reads the lights from
+			// the Bridge Pro (behind a cache), and the queue-sensitive Pro should not
+			// be polled for an audience of nobody.
+			if s.hub.hasSubscribers() {
+				s.hub.SetSnapshot(BuildSnapshot(s.src))
+			}
 		}
 	}
 }
@@ -82,6 +89,14 @@ func (s *Server) handleFlash(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "cross-origin request rejected", http.StatusForbidden)
 		return
 	}
+	// Single-flight: a flash runs synchronous Bridge Pro calls per light, so reject
+	// overlapping requests (impatient double-clicks) rather than piling concurrent
+	// flash sequences onto the queue-sensitive Pro.
+	if !s.flashing.CompareAndSwap(false, true) {
+		http.Error(w, "a flash is already in progress", http.StatusTooManyRequests)
+		return
+	}
+	defer s.flashing.Store(false)
 	if err := s.flash(); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return

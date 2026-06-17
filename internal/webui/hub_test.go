@@ -44,6 +44,21 @@ func TestHub_CancelStopsDelivery(t *testing.T) {
 	}
 }
 
+func TestHub_HasSubscribers(t *testing.T) {
+	h := NewHub(8)
+	if h.hasSubscribers() {
+		t.Fatal("fresh hub should have no subscribers")
+	}
+	_, cancel := h.Subscribe()
+	if !h.hasSubscribers() {
+		t.Fatal("expected a subscriber after Subscribe")
+	}
+	cancel()
+	if h.hasSubscribers() {
+		t.Fatal("expected no subscribers after cancel")
+	}
+}
+
 func TestHub_SlowSubscriberDoesNotBlock(t *testing.T) {
 	h := NewHub(8)
 	_, cancel := h.Subscribe() // never drained
