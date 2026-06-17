@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -99,6 +100,72 @@ func TestServer_FlashRejectsCrossOrigin(t *testing.T) {
 	srv.Handler().ServeHTTP(rec, req)
 	if rec.Code != http.StatusForbidden || called {
 		t.Fatalf("cross-origin POST should be rejected: code=%d called=%v", rec.Code, called)
+	}
+}
+
+// countingSource counts how often the snapshot builder reads it.
+type countingSource struct {
+	fakeSource
+	reads *int32
+}
+
+func (c countingSource) Version() string {
+	atomic.AddInt32(c.reads, 1)
+	return c.fakeSource.Version()
+}
+
+func TestServer_SnapshotLoopIdleWithoutSubscribers(t *testing.T) {
+	var reads int32
+	srv := NewServer(":0", NewHub(8), countingSource{reads: &reads}, nil, discardLog())
+	srv.snapInterval = 5 * time.Millisecond
+
+	ctx, cancel := context.WithCancel(context.Background())
+	go srv.runSnapshotLoop(ctx)
+	time.Sleep(60 * time.Millisecond) // many ticks would have elapsed
+	cancel()
+
+	if n := atomic.LoadInt32(&reads); n != 0 {
+		t.Fatalf("snapshot loop polled the source %d times with no subscribers — should be 0", n)
+	}
+}
+
+func TestServer_FlashSingleFlight(t *testing.T) {
+	started := make(chan struct{})
+	release := make(chan struct{})
+	srv := NewServer(":0", NewHub(8), fakeSource{}, func() error {
+		close(started)
+		<-release
+		return nil
+	}, discardLog())
+	h := srv.Handler()
+
+	// First request acquires the guard and blocks inside flash().
+	rec1 := httptest.NewRecorder()
+	go h.ServeHTTP(rec1, httptest.NewRequest(http.MethodPost, "/api/actions/flash", nil))
+	<-started
+
+	// Second concurrent request must be rejected, not piled onto the Pro.
+	rec2 := httptest.NewRecorder()
+	h.ServeHTTP(rec2, httptest.NewRequest(http.MethodPost, "/api/actions/flash", nil))
+	if rec2.Code != http.StatusTooManyRequests {
+		t.Fatalf("concurrent flash: code=%d, want 429", rec2.Code)
+	}
+
+	// Let the first finish; a subsequent request is accepted again.
+	close(release)
+	deadline := time.After(time.Second)
+	for {
+		rec3 := httptest.NewRecorder()
+		srv2 := NewServer(":0", NewHub(8), fakeSource{}, func() error { return nil }, discardLog())
+		srv2.Handler().ServeHTTP(rec3, httptest.NewRequest(http.MethodPost, "/api/actions/flash", nil))
+		if rec3.Code == http.StatusNoContent {
+			break
+		}
+		select {
+		case <-deadline:
+			t.Fatal("flash never accepted again after the in-flight one finished")
+		default:
+		}
 	}
 }
 
