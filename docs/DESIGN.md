@@ -133,8 +133,6 @@ overrides that with a custom port and must differ from the TV-facing `-http-port
   server (browsers always send it cross-origin), closing the browser/DNS-rebinding path. A missing
   `Origin` (curl / direct LAN access) is allowed — that path is already within the trusted-LAN model.
 
-See the design spec at [superpowers/specs/2026-06-17-web-ui-design.md](superpowers/specs/2026-06-17-web-ui-design.md).
-
 ## Identity invariants
 
 The TV is picky about the emulated bridge identity:
