@@ -55,11 +55,12 @@ type ProStreamer struct {
 	fallback  FallbackSink
 	log       *slog.Logger
 
-	// OnColor, if set, is called with each streamed light's v1 id and its v1 state
-	// ({on,bri,xy}) on the DTLS passthrough path, so the web UI can show the live
-	// streamed colour (and mark the light driven). The REST fallback path is covered
-	// by the provider's OnColor via the fallback sink. Wired by main.
-	OnColor func(v1id string, state map[string]any)
+	// OnColor, if set, is called once per DTLS-passthrough frame with a map of v1
+	// light id → v1 state ({on,bri,xy}), so the web UI can show the live streamed
+	// colour (and mark the light driven). Batched per frame to take one lock on the
+	// hot path. The REST fallback path is covered by the provider's OnColor via the
+	// fallback sink. Wired by main.
+	OnColor func(states map[string]map[string]any)
 
 	// port overrides the Pro DTLS port (default 2100); for tests.
 	port int
@@ -209,11 +210,14 @@ func (s *ProStreamer) Push(_ string, f *huestream.Frame) {
 		// Surface the live per-light colour to the UI (outside the stream lock). This
 		// is the only point the DTLS passthrough exposes per-light state, so it also
 		// drives the "driven" marking. ToHueV1State converts the raw frame colour to
-		// the {on,bri,xy} shape the UI/REST path uses.
+		// the {on,bri,xy} shape the UI/REST path uses; the whole frame is handed over
+		// at once so the store takes a single lock.
 		if s.OnColor != nil {
+			states := make(map[string]map[string]any, len(f.Channels))
 			for _, ch := range f.Channels {
-				s.OnColor(strconv.Itoa(int(ch.ID)), ToHueV1State(f.ColorSpace, ch))
+				states[strconv.Itoa(int(ch.ID))] = ToHueV1State(f.ColorSpace, ch)
 			}
+			s.OnColor(states)
 		}
 		return
 	}

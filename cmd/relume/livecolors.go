@@ -28,11 +28,30 @@ func newLiveColors() *liveColors {
 	return &liveColors{m: map[string]webui.LiveColor{}}
 }
 
-// SetState records the colour from a v1 light state map ({on,bri,xy}), the shape
-// produced by both the REST forward and entertainment.ToHueV1State. Called on the
-// hot per-frame path, so it does only a cheap parse + map write. The xy field can
-// arrive as []float64 (from ToHueV1State) or []any (decoded from the TV's JSON).
+// SetState records the colour from one v1 light state map ({on,bri,xy}). Used by
+// the REST forward, which forwards one light at a time.
 func (c *liveColors) SetState(v1id string, state map[string]any) {
+	lc := parseLiveColor(state)
+	c.mu.Lock()
+	c.m[v1id] = lc
+	c.mu.Unlock()
+}
+
+// SetStates records a whole frame's colours under a single lock. Used by the DTLS
+// passthrough, which decodes all channels of a frame at once on the hot ~50 Hz
+// path — one lock per frame instead of per channel.
+func (c *liveColors) SetStates(states map[string]map[string]any) {
+	c.mu.Lock()
+	for v1id, state := range states {
+		c.m[v1id] = parseLiveColor(state)
+	}
+	c.mu.Unlock()
+}
+
+// parseLiveColor turns a v1 light state map ({on,bri,xy}) — the shape produced by
+// both the REST forward and entertainment.ToHueV1State — into a LiveColor. The xy
+// field can arrive as []float64 (from ToHueV1State) or []any (decoded TV JSON).
+func parseLiveColor(state map[string]any) webui.LiveColor {
 	lc := webui.LiveColor{On: true}
 	if on, ok := state["on"].(bool); ok {
 		lc.On = on
@@ -54,9 +73,7 @@ func (c *liveColors) SetState(v1id string, state map[string]any) {
 			lc.Y, _ = xy[1].(float64)
 		}
 	}
-	c.mu.Lock()
-	c.m[v1id] = lc
-	c.mu.Unlock()
+	return lc
 }
 
 // Snapshot returns a copy of the current per-v1-id colours for a UI snapshot.

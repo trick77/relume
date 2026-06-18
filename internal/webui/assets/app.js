@@ -89,6 +89,9 @@ function renderSetup(s) {
 function renderDashboard(s) {
   // Show only the lamps the TV is actively driving. Fall back to all lamps
   // while nothing is driven yet (cold start / TV idle before first stream).
+  // Note: driven is sticky — a lamp stays driven once seen this run (the backend
+  // never un-drives), so this is effectively "ever driven since start", retained
+  // across stream pauses. A shrunk entertainment area clears only on restart.
   const drivenLights = s.lights.filter((l) => l.driven);
   const shown = drivenLights.length > 0 ? drivenLights : s.lights;
   const lights = shown

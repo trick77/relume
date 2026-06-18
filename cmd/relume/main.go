@@ -387,7 +387,7 @@ func runServe(args []string, log *slog.Logger) error {
 			streamer := entertainment.NewProStreamer(proClient, pro.Host, pro.AppKey, clientKey, clip.ForwardLight, log)
 			// Surface the live DTLS-passthrough colours to the web UI (the REST path is
 			// covered by the provider's OnColor via the fallback sink).
-			streamer.OnColor = liveColors.SetState
+			streamer.OnColor = liveColors.SetStates
 			// Persist/reuse relume's own entertainment_configuration across restarts
 			// instead of re-finding it each stream (Phase D).
 			streamer.SetConfigStore(cfg.LoadEntConfigID, func(id string) {
