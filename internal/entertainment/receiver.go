@@ -121,6 +121,14 @@ func (r *Receiver) handle(ctx context.Context, conn net.Conn) {
 		dropped     uint64
 		last        *huestream.Frame
 		firstLogged bool
+		// Per-window frame stats (reset each 5s rollup) to tell genuine flicker —
+		// brightness dipping toward 0 (black flashes) — from merely hard-but-correct
+		// colour jumps. briMin starts at the max sentinel so the first frame lowers it.
+		briMin   uint32 = 0xFFFF
+		briMax   uint32
+		briJump  uint32 // largest |Δbrightness| between consecutive frames
+		colJump  uint32 // largest colour jump between consecutive frames
+		nearZero uint64 // channel samples below nearZeroBri (a black-flash indicator)
 	)
 	done := make(chan struct{})
 
@@ -175,6 +183,35 @@ func (r *Receiver) handle(ctx context.Context, conn net.Conn) {
 				}
 			}
 			mu.Lock()
+			// Accumulate per-window brightness/jump stats. Brightness extremes come
+			// from this frame; jumps are measured against the previous frame (last).
+			for _, ch := range f.Channels {
+				b := brightness(f.ColorSpace, ch)
+				if b < briMin {
+					briMin = b
+				}
+				if b > briMax {
+					briMax = b
+				}
+				if b < nearZeroBri {
+					nearZero++
+				}
+			}
+			if last != nil && len(last.Channels) == len(f.Channels) {
+				for i := range f.Channels {
+					cur, prv := f.Channels[i], last.Channels[i]
+					if d := absDiff(brightness(f.ColorSpace, cur), brightness(last.ColorSpace, prv)); d > briJump {
+						briJump = d
+					}
+					cj := absDiff(uint32(cur.A), uint32(prv.A)) + absDiff(uint32(cur.B), uint32(prv.B))
+					if f.ColorSpace != huestream.ColorSpaceXY {
+						cj += absDiff(uint32(cur.C), uint32(prv.C))
+					}
+					if cj > colJump {
+						colJump = cj
+					}
+				}
+			}
 			frames++
 			last = f
 			logFirst := !firstLogged
@@ -207,15 +244,47 @@ func (r *Receiver) handle(ctx context.Context, conn net.Conn) {
 		case <-t.C:
 			mu.Lock()
 			total, drops, f := frames, dropped, last
+			bMin, bMax, bJump, cJump, nz := briMin, briMax, briJump, colJump, nearZero
+			// Reset the window accumulators for the next interval.
+			briMin, briMax, briJump, colJump, nearZero = 0xFFFF, 0, 0, 0, 0
 			mu.Unlock()
 			if f != nil && total != prev {
 				r.log.Info("entertainment stream", "from", remote,
 					"frames_5s", total-prev, "frames_dropped", drops, "channels", len(f.Channels),
-					"colorspace", f.ColorSpaceName(), "sample", sample(f))
+					"colorspace", f.ColorSpaceName(),
+					"bri_min", bMin, "bri_max", bMax, "bri_max_jump", bJump,
+					"col_max_jump", cJump, "near_zero", nz, "sample", sample(f))
 				prev = total
 			}
 		}
 	}
+}
+
+// nearZeroBri is the raw 16-bit brightness below which a channel counts as a
+// near-black sample (~3% of full) — used to flag black-flash flicker.
+const nearZeroBri = 2048
+
+// brightness returns a channel's brightness for the frame's colour space: xy
+// frames carry it directly in C; rgb frames approximate it as max(R,G,B).
+func brightness(colorSpace uint8, c huestream.Channel) uint32 {
+	if colorSpace == huestream.ColorSpaceXY {
+		return uint32(c.C)
+	}
+	m := c.A
+	if c.B > m {
+		m = c.B
+	}
+	if c.C > m {
+		m = c.C
+	}
+	return uint32(m)
+}
+
+func absDiff(a, b uint32) uint32 {
+	if a > b {
+		return a - b
+	}
+	return b - a
 }
 
 // sample formats the first channel's color, scaled to 8-bit, for readable logs.
