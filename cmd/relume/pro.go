@@ -117,7 +117,11 @@ func newProWatcher(cfg *config.Config, clip *clipv1.Server, controlled *bridge.C
 		log:        log,
 	}
 	w.healthCheck = func(p *config.BridgePro) error {
-		_, err := bridgepro.New(p).Lights()
+		// Liveness probe only: BridgeInfo reads the single bridge resource, which is
+		// far lighter than Lights() (the full light list) and enough to prove the Pro
+		// is reachable. Failure modes (unreachable / queue-full / domain) are what
+		// tick() switches on; the returned name/id are irrelevant here.
+		_, _, err := bridgepro.New(p).BridgeInfo()
 		return err
 	}
 	w.discover = bridgepro.Discover

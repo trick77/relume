@@ -1,6 +1,7 @@
 package config
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 )
@@ -42,6 +43,88 @@ func TestLoad_GeneratesAndPersistsIdentity(t *testing.T) {
 	if c1.Identity.Serial != c2.Identity.Serial {
 		t.Errorf("serial not stable: %q != %q", c1.Identity.Serial, c2.Identity.Serial)
 	}
+}
+
+func TestLoad_StampsAndPersistsSchemaVersion(t *testing.T) {
+	// Given: a fresh config
+	path := filepath.Join(t.TempDir(), "relume.json")
+	c, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	// Then: the current schema version is set and survives a reload
+	if c.SchemaVersion != CurrentSchemaVersion {
+		t.Fatalf("SchemaVersion = %d, want %d", c.SchemaVersion, CurrentSchemaVersion)
+	}
+	data, _ := os.ReadFile(path)
+	if !contains(data, []byte(`"schemaVersion"`)) {
+		t.Errorf("schemaVersion not written to disk: %s", data)
+	}
+}
+
+func TestLoad_MigratesLegacyZeroVersion(t *testing.T) {
+	// Given: a legacy config with no schemaVersion field
+	path := filepath.Join(t.TempDir(), "relume.json")
+	if err := os.WriteFile(path, []byte(`{"identity":{"serial":"2c4d54ea2832"},"apiUsers":{}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	// When
+	c, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	// Then: it is adopted to the current version
+	if c.SchemaVersion != CurrentSchemaVersion {
+		t.Errorf("SchemaVersion = %d, want %d", c.SchemaVersion, CurrentSchemaVersion)
+	}
+}
+
+func TestLoad_RejectsNewerSchemaVersion(t *testing.T) {
+	// Given: a config written by a newer build
+	path := filepath.Join(t.TempDir(), "relume.json")
+	if err := os.WriteFile(path, []byte(`{"schemaVersion":9999,"identity":{"serial":"2c4d54ea2832"}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	// When / Then: refuse rather than silently mishandle
+	if _, err := Load(path); err == nil {
+		t.Fatal("expected error for newer schema version, got nil")
+	}
+}
+
+func TestLoad_RemovesOrphanedTempFile(t *testing.T) {
+	// Given: a real config plus a leftover .tmp from a crashed save
+	dir := t.TempDir()
+	path := filepath.Join(dir, "relume.json")
+	if _, err := Load(path); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, []byte("garbage"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	// When
+	if _, err := Load(path); err != nil {
+		t.Fatalf("Load 2: %v", err)
+	}
+
+	// Then: the orphaned temp file is gone
+	if _, err := os.Stat(tmp); !os.IsNotExist(err) {
+		t.Errorf("orphaned .tmp not removed (stat err = %v)", err)
+	}
+}
+
+func contains(haystack, needle []byte) bool {
+	for i := 0; i+len(needle) <= len(haystack); i++ {
+		if string(haystack[i:i+len(needle)]) == string(needle) {
+			return true
+		}
+	}
+	return false
 }
 
 func TestEntConfigID_RoundTripsAndClears(t *testing.T) {

@@ -95,11 +95,19 @@ func (p *BridgePro) LogValue() slog.Value {
 	return slog.GroupValue(attrs...)
 }
 
+// CurrentSchemaVersion is the schema version this binary writes. Bump it whenever a
+// breaking change to the on-disk layout needs an explicit migration. A loaded config
+// with a higher version than this is refused (the binary is too old to understand it);
+// a missing/zero version is treated as the first schema and stamped on the next save.
+const CurrentSchemaVersion = 1
+
 // Config is the entire persistent state.
 type Config struct {
-	Identity Identity            `json:"identity"`
-	ApiUsers map[string]*ApiUser `json:"apiUsers"`
-	Pro      *BridgePro          `json:"bridgePro,omitempty"`
+	// SchemaVersion is the on-disk layout version. See CurrentSchemaVersion.
+	SchemaVersion int                 `json:"schemaVersion"`
+	Identity      Identity            `json:"identity"`
+	ApiUsers      map[string]*ApiUser `json:"apiUsers"`
+	Pro           *BridgePro          `json:"bridgePro,omitempty"`
 	// EntConfigID is the id of relume's own entertainment_configuration on the Pro,
 	// persisted so the entertainment streamer can reuse it across restarts instead of
 	// re-finding (or recreating) it on each stream. Top-level rather than inside Pro
@@ -116,6 +124,10 @@ type Config struct {
 func Load(path string) (*Config, error) {
 	c := &Config{path: path, ApiUsers: map[string]*ApiUser{}}
 
+	// Clean up an orphaned temp file from a previous crashed/failed save so it never
+	// lingers as garbage next to the real config. Best-effort.
+	_ = os.Remove(path + ".tmp")
+
 	data, err := os.ReadFile(path)
 	switch {
 	case os.IsNotExist(err):
@@ -123,6 +135,7 @@ func Load(path string) (*Config, error) {
 		if gerr != nil {
 			return nil, gerr
 		}
+		c.SchemaVersion = CurrentSchemaVersion
 		c.Identity = Identity{Serial: serial}
 		if serr := c.save(); serr != nil {
 			return nil, serr
@@ -134,6 +147,14 @@ func Load(path string) (*Config, error) {
 
 	if err := json.Unmarshal(data, c); err != nil {
 		return nil, fmt.Errorf("parse config: %w", err)
+	}
+	if c.SchemaVersion > CurrentSchemaVersion {
+		return nil, fmt.Errorf("config schema version %d is newer than this build supports (%d); upgrade relume", c.SchemaVersion, CurrentSchemaVersion)
+	}
+	// A zero version is a legacy/first-schema file: adopt the current version so the
+	// next save stamps it. Add real per-version migrations here as the schema evolves.
+	if c.SchemaVersion == 0 {
+		c.SchemaVersion = CurrentSchemaVersion
 	}
 	if c.ApiUsers == nil {
 		c.ApiUsers = map[string]*ApiUser{}
@@ -239,23 +260,65 @@ func (c *Config) SaveEntConfigID(id string) error {
 	return c.save()
 }
 
-// save writes the config atomically to c.path. The caller may hold the lock.
+// save writes the config atomically and durably to c.path. The caller may hold the
+// lock. The temp file is fsync'd before the rename and the directory is fsync'd after,
+// so a crash/power loss leaves either the old or the new file intact, never a partial
+// one. A failed rename removes the temp file so no garbage lingers.
 func (c *Config) save() error {
 	if c.path == "" {
 		return nil
+	}
+	if c.SchemaVersion == 0 {
+		c.SchemaVersion = CurrentSchemaVersion
 	}
 	data, err := json.MarshalIndent(c, "", "  ")
 	if err != nil {
 		return fmt.Errorf("serialize config: %w", err)
 	}
-	if err := os.MkdirAll(filepath.Dir(c.path), 0o755); err != nil {
+	dir := filepath.Dir(c.path)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
 	tmp := c.path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o600); err != nil {
+	if err := writeFileSync(tmp, data); err != nil {
 		return err
 	}
-	return os.Rename(tmp, c.path)
+	if err := os.Rename(tmp, c.path); err != nil {
+		_ = os.Remove(tmp) // don't leave a half-written temp behind
+		return err
+	}
+	return fsyncDir(dir)
+}
+
+// writeFileSync writes data to path (0600) and fsyncs it before returning, so the
+// bytes are on disk before the caller renames it into place.
+func writeFileSync(path string, data []byte) error {
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
+	if err != nil {
+		return err
+	}
+	if _, werr := f.Write(data); werr != nil {
+		f.Close()
+		return werr
+	}
+	if serr := f.Sync(); serr != nil {
+		f.Close()
+		return serr
+	}
+	return f.Close()
+}
+
+// fsyncDir flushes a directory entry (the rename) to disk. A failure to open/sync the
+// directory is non-fatal on platforms that don't support it; the rename itself already
+// succeeded, so a best-effort sync is enough.
+func fsyncDir(dir string) error {
+	d, err := os.Open(dir)
+	if err != nil {
+		return nil //nolint:nilerr // directory fsync is best-effort
+	}
+	defer d.Close()
+	_ = d.Sync()
+	return nil
 }
 
 // generateSerial generates a random 12-digit hex serial (6 bytes).

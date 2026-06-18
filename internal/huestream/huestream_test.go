@@ -93,6 +93,33 @@ func TestEncode_v2_roundTrip(t *testing.T) {
 	}
 }
 
+func TestEncode_v2_dropsChannelIDOver255(t *testing.T) {
+	// A v2 channel id must fit one byte. byte(256) would alias to channel 0 and
+	// silently drive the wrong light; Encode must drop such a channel instead.
+	in := &Frame{
+		Major:      2,
+		Minor:      0,
+		Sequence:   1,
+		ColorSpace: ColorSpaceXY,
+		ConfigID:   "abcdefab-1234-1234-1234-0123456789ab",
+		Channels: []Channel{
+			{ID: 3, A: 0x1111, B: 0x2222, C: 0x3333},
+			{ID: 300, A: 0x4444, B: 0x5555, C: 0x6666}, // out of range → dropped
+		},
+	}
+
+	out, err := Parse(Encode(in))
+	if err != nil {
+		t.Fatalf("parse(encode): %v", err)
+	}
+	if len(out.Channels) != 1 {
+		t.Fatalf("channels = %d, want 1 (the >255 id dropped)", len(out.Channels))
+	}
+	if out.Channels[0].ID != 3 {
+		t.Fatalf("kept channel id = %d, want 3", out.Channels[0].ID)
+	}
+}
+
 func TestEncode_v1_roundTrip(t *testing.T) {
 	in := &Frame{
 		Major:      1,

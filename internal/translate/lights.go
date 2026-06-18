@@ -62,7 +62,7 @@ func lightV1(l bridgepro.Light) map[string]any {
 	}
 	name := l.Metadata.Name
 	if name == "" {
-		name = "Hue light " + l.ID[:8]
+		name = "Hue light " + shortID(l.ID)
 	}
 	typ, modelid, productname := lightProfile(l.HasColor(), l.HasColorTemperature(), l.HasDimming())
 	return map[string]any{
@@ -91,6 +91,16 @@ func lightProfile(color, ct, dim bool) (typ, modelid, productname string) {
 	default:
 		return "On/Off plug-in unit", "LOM001", "Hue Smart plug"
 	}
+}
+
+// shortID returns the first 8 chars of a resource UUID for a fallback light name,
+// guarding against a malformed/short id (a v2 UUID is normally 36 chars, but never
+// panic the whole light list on a surprising backend value).
+func shortID(id string) string {
+	if len(id) >= 8 {
+		return id[:8]
+	}
+	return id
 }
 
 // briFromPercent converts the v2 brightness (0..100 %) into v1 bri (1..254).

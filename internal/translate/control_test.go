@@ -60,6 +60,32 @@ func TestStateV1ToV2_xyFloat64Slice(t *testing.T) {
 	}
 }
 
+func TestStateV1ToV2_briInt64(t *testing.T) {
+	// Given: bri arrives as an int64 (the "stuck red" bug class — an unhandled
+	// numeric width silently dropped the value).
+	v2 := StateV1ToV2(map[string]any{"on": true, "bri": int64(254)})
+
+	// Then: dimming must still be emitted at full brightness.
+	dim, ok := v2["dimming"].(map[string]any)
+	if !ok {
+		t.Fatalf("dimming missing for int64 bri: %#v", v2)
+	}
+	if dim["brightness"].(float64) != 100 {
+		t.Errorf("brightness = %v, expected 100", dim["brightness"])
+	}
+}
+
+func TestStateV1ToV2_malformedXYDropped(t *testing.T) {
+	// Given: an xy pair whose components are not numeric. Emitting color anyway
+	// would push a bogus (0,0) to the Pro; the pair must be dropped instead.
+	v2 := StateV1ToV2(map[string]any{"on": true, "xy": []any{"oops", 0.4}})
+
+	// Then
+	if _, hasColor := v2["color"]; hasColor {
+		t.Errorf("color should be dropped for malformed xy: %#v", v2["color"])
+	}
+}
+
 func TestStateV1ToV2_ctOnly(t *testing.T) {
 	// Given: only white/CT control
 	v2 := StateV1ToV2(map[string]any{"on": false, "ct": float64(300)})

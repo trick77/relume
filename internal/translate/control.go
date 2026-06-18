@@ -50,8 +50,12 @@ func xyPair(v any) (x, y float64, ok bool) {
 		if len(xy) != 2 {
 			return 0, 0, false
 		}
-		x, _ = toFloat(xy[0])
-		y, _ = toFloat(xy[1])
+		xok, yok := false, false
+		x, xok = toFloat(xy[0])
+		y, yok = toFloat(xy[1])
+		if !xok || !yok {
+			return 0, 0, false // malformed component → drop, don't emit a bogus (0,0)
+		}
 		return x, y, true
 	case []float64:
 		if len(xy) != 2 {
@@ -67,11 +71,21 @@ func xyPair(v any) (x, y float64, ok bool) {
 	return 0, 0, false
 }
 
+// toFloat accepts the numeric types that can reach the control path: float64/int
+// from JSON-decoded TV REST PUTs and the in-process entertainment path, plus the
+// remaining int/float widths defensively. Omitting int64 was the "stuck red" bug
+// class — an int64 bri silently failed to convert and the colour was dropped.
 func toFloat(v any) (float64, bool) {
 	switch n := v.(type) {
 	case float64:
 		return n, true
+	case float32:
+		return float64(n), true
 	case int:
+		return float64(n), true
+	case int64:
+		return float64(n), true
+	case int32:
 		return float64(n), true
 	}
 	return 0, false

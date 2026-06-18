@@ -91,6 +91,29 @@ func TestLightV1_typesByCapability(t *testing.T) {
 	}
 }
 
+func TestLightV1_shortIDFallbackNamesDoNotPanic(t *testing.T) {
+	// A backend id shorter than 8 chars must not panic the whole light list when
+	// the bulb has no name (id[:8] would slice out of range).
+	cases := []struct {
+		id   string
+		want string
+	}{
+		{"abc", "Hue light abc"},
+		{"0123456789abcdef", "Hue light 01234567"},
+		{"", "Hue light "},
+	}
+	for _, c := range cases {
+		var l bridgepro.Light
+		l.ID = c.id
+		l.Color = &bridgepro.LightColor{}
+		l.Color.XY.X = 0.4
+		v := lightV1(l)
+		if v["name"] != c.want {
+			t.Errorf("name for id %q = %v, want %v", c.id, v["name"], c.want)
+		}
+	}
+}
+
 func TestBriFromPercent(t *testing.T) {
 	cases := []struct {
 		pct  float64

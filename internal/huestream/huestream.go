@@ -63,6 +63,10 @@ func Encode(f *Frame) []byte {
 		copy(id, f.ConfigID)
 		b = append(b, id...)
 		for _, c := range f.Channels {
+			if c.ID > 255 {
+				continue // a v2 channel id must fit one byte; callers remap into 0..255,
+				// so a larger id is a remap bug — drop it rather than alias another channel.
+			}
 			b = append(b, byte(c.ID))
 			b = appendU16(b, c.A)
 			b = appendU16(b, c.B)
