@@ -467,6 +467,27 @@ func TestGroupAction_fansOutToAllLights(t *testing.T) {
 	}
 }
 
+func TestGroupAction_noLightsStillAcksOk(t *testing.T) {
+	// Given: a paired TV but no light provider registered (no lights known)
+	_, ts := newTestServer(t)
+	resp := mustPostUA(t, ts.URL+"/api", `{"devicetype":"Philips_TV#Ambilight","generateclientkey":true}`, tvUserAgent)
+	var paired []map[string]map[string]string
+	json.NewDecoder(resp.Body).Decode(&paired)
+	resp.Body.Close()
+	username := paired[0]["success"]["username"]
+
+	// When: the TV drives a real group action with nothing to forward to
+	r := mustPut(t, ts.URL+"/api/"+username+"/groups/1/action", `{"on":true,"bri":200}`)
+	defer r.Body.Close()
+
+	// Then: the handler still acks ok (the no-op is logged, see handleGroupAction)
+	var ack []map[string]map[string]any
+	json.NewDecoder(r.Body).Decode(&ack)
+	if got := ack[0]["success"]["/groups/1/action"]; got != "ok" {
+		t.Fatalf("group action ack = %v, want ok", ack)
+	}
+}
+
 func TestMarkActivity_advancesLastActivity(t *testing.T) {
 	// Given: a server with no activity yet (entertainment mode has no REST writes)
 	s, _ := newTestServer(t)

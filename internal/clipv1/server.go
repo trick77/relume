@@ -688,9 +688,7 @@ func (s *Server) handleGroupAction(w http.ResponseWriter, r *http.Request) {
 	body, _ := io.ReadAll(r.Body)
 
 	var action map[string]any
-	if err := json.Unmarshal(body, &action); err != nil {
-		action = nil
-	}
+	_ = json.Unmarshal(body, &action) // a malformed body leaves action nil → forwarded 0
 	forwarded := 0
 	if len(action) > 0 {
 		for v1id := range s.lightsV1() {
@@ -698,7 +696,14 @@ func (s *Server) handleGroupAction(w http.ResponseWriter, r *http.Request) {
 			forwarded++
 		}
 	}
-	s.log.Info("group action forwarded", "group", id, "lights", forwarded, "body", string(body))
+	if len(action) > 0 && forwarded == 0 {
+		// A real action arrived but there are no lights to apply it to (none paired yet
+		// or the light list could not be read — lightsV1 warns separately on a read
+		// error). Surface the no-op rather than letting "lights":0 read like success.
+		s.log.Warn("group action received but no lights known to forward to (not applied)", "group", id, "body", string(body))
+	} else {
+		s.log.Info("group action forwarded", "group", id, "lights", forwarded, "body", string(body))
+	}
 	writeJSON(w, []map[string]any{{"success": map[string]any{"/groups/" + id + "/action": "ok"}}})
 }
 
