@@ -230,9 +230,12 @@ func (s *Server) logRequests(next http.Handler) http.Handler {
 			// The group-action path is the other high-frequency control route;
 			// accumulate it too so it does not flood and shows up in the Hz rollup.
 			s.recordGroupActionWrite()
-		} else {
+		} else if s.isTVRequest(r) {
 			s.log.Info("http", "method", r.Method, "path", r.URL.Path, "from", r.RemoteAddr, "user-agent", r.UserAgent())
 		}
+		// Otherwise: a non-TV LAN device (browser, scanner, other Hue app) probing
+		// the CLIP v1 facade. In non-debug mode these only add noise, so drop them;
+		// the debug branch above still logs every request including its User-Agent.
 		next.ServeHTTP(rec, r)
 		if s.Debug {
 			s.log.Info("http tx", "method", r.Method, "requestURI", r.URL.RequestURI(), "status", rec.status, "bytes", rec.bytes)

@@ -21,7 +21,7 @@ function healthLabel(h) {
   return {
     "streaming-pro": "Active · streaming to Pro",
     "entertainment-fallback": "Active · entertainment fallback → REST",
-    "entertainment-rest": "Active · REST (TV not streaming entertainment)",
+    "entertainment-rest": "Active",
     "following-rest": "Active · REST-follow",
     "idle": "Idle · TV not driving",
     "no-tv": "Waiting for TV pairing",
@@ -36,6 +36,14 @@ function healthDotClass(h) {
   if (h === "entertainment-fallback") return "dot pulse"; // amber: degraded (DTLS failed → REST)
   if (h === "idle") return "dot pulse"; // amber standby
   return "dot pulse"; // amber: needs attention (no-tv / unpaired-pro)
+}
+
+// currentMode is the path relume is forwarding on RIGHT NOW, not the configured
+// startup mode. The TV only drives over entertainment/DTLS while its stream is
+// actually up; in every other case (rest mode, fallback, or entertainment
+// configured but the TV not streaming) the live path is REST.
+function currentMode(s) {
+  return s.dtlsStreamUp ? "entertainment" : "rest";
 }
 
 // modeSub describes the active forward path under the MODE label. It must never
@@ -119,7 +127,7 @@ function renderDashboard(s) {
       <div class="pipe">
         <div class="step"><div class="lbl">Bridge Pro</div><div class="val">${s.proPaired ? "✓ Paired" : "— Unpaired"}</div><div class="sub">${esc(s.proName)} ${esc(s.proHost)}</div></div>
         <div class="step"><div class="lbl">TV pairing</div><div class="val">${s.tvClients.length} client(s)</div><div class="sub">${esc(s.tvClients.join(", "))}</div></div>
-        <div class="step"><div class="lbl">Mode</div><div class="val">${esc(s.mode)}${s.fallback ? " (fallback)" : ""}</div><div class="sub">${esc(modeSub(s))}</div></div>
+        <div class="step"><div class="lbl">Mode</div><div class="val">${esc(currentMode(s))}${s.fallback ? " (fallback)" : ""}</div><div class="sub">${esc(modeSub(s))}</div></div>
         <div class="step"><div class="lbl">Lights</div><div class="val">${s.lights.length}</div><div class="sub">${driven} driven by TV</div></div>
       </div>
       <div class="grid">

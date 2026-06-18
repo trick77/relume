@@ -947,6 +947,45 @@ func TestActivitySummary_includesGroupActionWritesAndHz(t *testing.T) {
 	}
 }
 
+func TestRequestLog_nonTVUserAgent_thenNotLoggedInNonDebug(t *testing.T) {
+	// Given: a non-debug server with a captured log
+	s, ts := newTestServer(t)
+	var buf strings.Builder
+	s.log = slog.New(slog.NewTextHandler(&buf, nil))
+
+	// When: a non-TV LAN device (default Go User-Agent) probes a read path
+	mustGet(t, ts.URL+"/api/abc/lights").Body.Close()
+
+	// Then: the catch-all request log is suppressed — only TV traffic is logged
+	if strings.Contains(buf.String(), "msg=http") {
+		t.Fatalf("non-TV request should not be logged in non-debug mode: %s", buf.String())
+	}
+}
+
+func TestRequestLog_tvUserAgent_thenLoggedInNonDebug(t *testing.T) {
+	// Given: a non-debug server with a captured log
+	s, ts := newTestServer(t)
+	var buf strings.Builder
+	s.log = slog.New(slog.NewTextHandler(&buf, nil))
+
+	// When: the TV (Android/Dalvik User-Agent) issues the same read
+	req, err := http.NewRequest(http.MethodGet, ts.URL+"/api/abc/lights", nil)
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	req.Header.Set("User-Agent", tvUserAgent)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	resp.Body.Close()
+
+	// Then: the request is logged
+	if !strings.Contains(buf.String(), "msg=http") {
+		t.Fatalf("TV request should be logged in non-debug mode: %s", buf.String())
+	}
+}
+
 func TestGroupsExposeMinimalEntertainmentGroup(t *testing.T) {
 	// Given
 	_, ts := newTestServer(t)
