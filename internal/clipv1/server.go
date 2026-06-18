@@ -103,6 +103,14 @@ func (s *Server) SetDTLSFallbackTimeout(d time.Duration) {
 	s.stream.setFallbackTimeout(d)
 }
 
+// SetDTLSFallbackRecovery overrides how long a latched REST fallback persists
+// before the next TV activation may recover it (the -entertainment-fallback-recovery
+// flag). A value ≤ 0 disables lazy recovery (sticky fallback until restart). Call
+// before serving.
+func (s *Server) SetDTLSFallbackRecovery(d time.Duration) {
+	s.stream.setRecoveryCooldown(d)
+}
+
 // confirmsEntertainment reports whether relume should confirm the TV's stream
 // activation for real: in entertainment mode, unless it has fallen back to REST
 // (see streamState.fallback).
@@ -697,6 +705,17 @@ func (s *Server) handleGroupUpdate(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	body, _ := io.ReadAll(r.Body)
 	s.log.Info("group update", "group", id, "body", string(body))
+
+	// Lazy fallback recovery: if a previous DTLS attempt latched the REST fallback
+	// and the cooldown has since elapsed, an activation request re-enables
+	// entertainment so the TV gets a real confirmation again (confirmsEntertainment
+	// below then re-evaluates true). Gated on an actual activate request so a latched
+	// fallback is not cleared by unrelated group updates.
+	if s.EntertainmentMode {
+		if active, ok := streamActiveFromBody(body); ok && active && s.stream.tryRecoverFallback() {
+			s.log.Info("control path: REST fallback recovered — re-honoring TV entertainment activation after cooldown")
+		}
+	}
 
 	if s.confirmsEntertainment() {
 		if active, ok := streamActiveFromBody(body); ok {

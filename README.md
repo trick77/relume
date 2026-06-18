@@ -90,6 +90,7 @@ State (bridge identity, TV tokens, **Bridge Pro app key + client key**) lives in
 - **`-bridge-ip`** — Bridge Pro IP (skips cloud discovery).
 - **`-idle-off-timeout`** &nbsp;·&nbsp; default `30s` — When the TV stops driving the lights for this long, flash them and turn them off (the TV sends no off signal, it just goes silent). `0` disables.
 - **`-entertainment-dtls-timeout`** &nbsp;·&nbsp; default `5s` — Entertainment mode: how long to wait, after confirming the TV's stream activation, for the TV to open its DTLS stream before reverting to REST-follow. Raise it if a TV opens its stream slower.
+- **`-entertainment-fallback-recovery`** &nbsp;·&nbsp; default `90s` — Entertainment mode: how long a latched REST fallback persists before the next TV stream activation may recover it (so a transient DTLS failure no longer pins the TV to REST until restart). Set `0` to disable (fallback stays sticky until restart).
 - **`-skip-tls-verify`** &nbsp;·&nbsp; default off — Skip Bridge Pro certificate pinning (fallback).
 - **`-ui`** &nbsp;·&nbsp; default off — Enable the optional web UI (setup assistant + live status dashboard) on the predefined port `33100`. Off keeps relume headless. **No authentication — only enable it on a trusted network**, since with `network_mode: host` the port is reachable by anyone on the LAN.
 - **`-ui-port`** &nbsp;·&nbsp; default `0` — Override the web UI port with a custom value (implies `-ui`). Must differ from `-http-port` (80).

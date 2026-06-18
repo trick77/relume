@@ -138,7 +138,7 @@ func (s *ProStreamer) Start(remote string) {
 		return
 	}
 	if len(s.clientKey) == 0 {
-		s.log.Warn("pro entertainment unavailable: no Pro clientKey on this pairing — re-pair to enable DTLS; staying on REST forward")
+		s.log.Warn("hue bridge pro entertainment unavailable: no clientKey on this pairing — re-pair to enable DTLS; staying on REST forward")
 		s.setPath("rest")
 		return
 	}
@@ -147,7 +147,7 @@ func (s *ProStreamer) Start(remote string) {
 	s.cancel = cancel
 	s.done = done
 	s.running = true
-	s.log.Info("pro entertainment: TV stream started, establishing DTLS path", "tv", remote)
+	s.log.Info("hue bridge pro entertainment: TV stream started, establishing DTLS path", "tv", remote)
 	go s.run(ctx, done)
 }
 
@@ -179,7 +179,7 @@ func (s *ProStreamer) Stop(remote string) {
 		<-done
 	}
 	s.teardown()
-	s.log.Info("pro entertainment: TV stream stopped, torn down Pro path", "tv", remote)
+	s.log.Info("hue bridge pro entertainment: TV stream stopped, torn down hue bridge pro path", "tv", remote)
 }
 
 // Push routes one decoded TV frame. With DTLS up it updates the per-channel colours
@@ -221,7 +221,7 @@ func (s *ProStreamer) run(ctx context.Context, done chan struct{}) {
 	for ctx.Err() == nil {
 		if err := s.establish(ctx); err != nil {
 			s.setPath("rest")
-			s.log.Warn("pro entertainment unavailable, falling back to REST forward", "err", err)
+			s.log.Warn("hue bridge pro entertainment unavailable, falling back to REST forward", "err", err)
 			select {
 			case <-ctx.Done():
 				return
@@ -244,32 +244,32 @@ func (s *ProStreamer) establish(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("ensure config: %w", err)
 	}
-	s.log.Info("pro entertainment config ready", "id", configID, "name", configName, "reused", reused, "channels", channels)
+	s.log.Info("hue bridge pro entertainment config ready", "id", configID, "name", configName, "reused", reused, "channels", channels)
 
 	if err := s.pro.StartStream(configID); err != nil {
 		// A reused config can be left active=true if relume restarted mid-stream
 		// (the Pro keeps the area active, ownerless). Starting an already-active
 		// configuration is rejected, so stop it and retry once — otherwise Phase C
 		// would fall back to REST permanently on every subsequent run.
-		s.log.Warn("pro entertainment start rejected, stopping a leftover-active config and retrying", "id", configID, "err", err)
+		s.log.Warn("hue bridge pro entertainment start rejected, stopping a leftover-active config and retrying", "id", configID, "err", err)
 		_ = s.pro.StopStream(configID)
 		if err := s.pro.StartStream(configID); err != nil {
 			return fmt.Errorf("start stream (after stop): %w", err)
 		}
 	}
-	s.log.Info("pro entertainment stream started", "id", configID)
+	s.log.Info("hue bridge pro entertainment stream started", "id", configID)
 
 	port := s.port
 	if port == 0 {
 		port = 2100
 	}
-	s.log.Info("pro DTLS stream connecting", "host", fmt.Sprintf("%s:%d", s.host, port), "identity", s.appKey)
+	s.log.Info("hue bridge pro DTLS stream connecting", "host", fmt.Sprintf("%s:%d", s.host, port), "identity", s.appKey)
 	conn, err := s.dial(ctx, s.host, port, s.appKey, s.clientKey)
 	if err != nil {
 		_ = s.pro.StopStream(configID)
 		return fmt.Errorf("dtls dial: %w", err)
 	}
-	s.log.Info("pro DTLS stream connected")
+	s.log.Info("hue bridge pro DTLS stream connected")
 
 	s.st.mu.Lock()
 	s.st.conn = conn
@@ -300,7 +300,7 @@ func (s *ProStreamer) sendLoop(ctx context.Context) {
 			seq := s.st.seq
 			s.st.mu.Unlock()
 			if sent != prev {
-				s.log.Info("pro entertainment stream", "frames_5s", sent-prev, "channels", ch, "seq", seq)
+				s.log.Info("hue bridge pro entertainment stream", "frames_5s", sent-prev, "channels", ch, "seq", seq)
 				prev = sent
 			}
 		case <-t.C:
@@ -316,7 +316,7 @@ func (s *ProStreamer) sendLoop(ctx context.Context) {
 				continue // nothing to send yet
 			}
 			if _, err := conn.Write(huestream.Encode(frame)); err != nil {
-				s.log.Warn("pro DTLS send failed, dropping to REST fallback", "err", err)
+				s.log.Warn("hue bridge pro DTLS send failed, dropping to REST fallback", "err", err)
 				s.teardown()
 				return
 			}
@@ -367,9 +367,9 @@ func (s *ProStreamer) teardown() {
 	}
 	if configID != "" {
 		if err := s.pro.StopStream(configID); err != nil {
-			s.log.Warn("pro entertainment stop stream", "id", configID, "err", err)
+			s.log.Warn("hue bridge pro entertainment stop stream", "id", configID, "err", err)
 		} else {
-			s.log.Info("pro entertainment stream stopped", "id", configID)
+			s.log.Info("hue bridge pro entertainment stream stopped", "id", configID)
 		}
 	}
 }
@@ -491,10 +491,10 @@ func (s *ProStreamer) ensureConfig() (id string, remap map[uint16]uint8, reused 
 		case gerr == nil:
 			// The color-light set changed under the config — stop (in case it is
 			// active) and delete it so it never lingers or hits the Pro's area limit.
-			s.log.Info("pro entertainment config stale (light set changed), recreating", "id", id)
+			s.log.Info("hue bridge pro entertainment config stale (light set changed), recreating", "id", id)
 			_ = s.pro.StopStream(id)
 			if derr := s.pro.DeleteEntertainmentConfig(id); derr != nil {
-				s.log.Warn("pro entertainment delete stale config", "id", id, "err", derr)
+				s.log.Warn("hue bridge pro entertainment delete stale config", "id", id, "err", derr)
 			}
 		default:
 			// The candidate is in the authoritative list yet GetEntertainmentConfig

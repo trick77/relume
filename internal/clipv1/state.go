@@ -138,15 +138,23 @@ type streamState struct {
 	// fallback flips entertainment mode back to REST-follow when the TV confirmed
 	// stream activation but never opened the DTLS stream within fallbackTimeout. It
 	// is a safety net so entertainment mode never leaves the lights unfollowed on a
-	// TV/firmware that does not open the stream. markStreamUp clears it under the
-	// lock, but note: once fallback latches, confirmsEntertainment() reports false,
-	// so the TV stays on REST and stops opening DTLS streams — markStreamUp then does
-	// not fire again in normal operation and fallback effectively persists until
-	// restart. The clear exists for the one reachable case: a stream-up that races a
-	// just-firing watchdog ("stream up wins"), not a broad mid-session recovery.
+	// TV/firmware that does not open the stream. It clears in two ways: markStreamUp
+	// (a stream-up that races a just-firing watchdog — "stream up wins"), and lazy
+	// recovery (tryRecoverFallback) — the next activation attempt after recoveryCooldown
+	// has elapsed clears it so a transient DTLS failure no longer pins the TV to REST
+	// until restart. recoveryCooldown ≫ fallbackTimeout bounds the flap to at most one
+	// short re-attempt per cooldown.
 	fallback        bool
 	fallbackTimeout time.Duration
 	watchdog        *time.Timer
+	// fallbackAt is when fallback last latched; tryRecoverFallback gates recovery on
+	// now()-fallbackAt ≥ recoveryCooldown. recoveryCooldown ≤ 0 disables recovery
+	// (fallback stays sticky until the next stream-up or restart).
+	fallbackAt       time.Time
+	recoveryCooldown time.Duration
+	// now is the clock seam (default time.Now) so the lazy-recovery cooldown is
+	// testable without sleeping. Read only under mu.
+	now func() time.Time
 	// gen is the watchdog generation token. It is bumped on every arm/disarm/
 	// stream-up; a fired watchdog only acts if its captured generation still
 	// matches, so a stale callback (already firing when it was stopped or
@@ -159,8 +167,17 @@ type streamState struct {
 	restNoticed bool
 }
 
+// defaultRecoveryCooldown is how long a latched REST fallback persists before the
+// next activation attempt may recover it. Much larger than the DTLS fallback
+// watchdog so a persistently-failing TV re-attempts at most once per cooldown.
+const defaultRecoveryCooldown = 90 * time.Second
+
 func newStreamState(fallbackTimeout time.Duration) *streamState {
-	return &streamState{fallbackTimeout: fallbackTimeout}
+	return &streamState{
+		fallbackTimeout:  fallbackTimeout,
+		recoveryCooldown: defaultRecoveryCooldown,
+		now:              time.Now,
+	}
 }
 
 // setFallbackTimeout overrides how long relume waits for the TV's DTLS stream
@@ -173,6 +190,50 @@ func (s *streamState) setFallbackTimeout(d time.Duration) {
 	s.mu.Lock()
 	s.fallbackTimeout = d
 	s.mu.Unlock()
+}
+
+// setRecoveryCooldown overrides how long a latched REST fallback must persist
+// before the next activation attempt is allowed to recover it (see
+// tryRecoverFallback). A value ≤ 0 disables lazy recovery (sticky fallback). A
+// negative value is treated as 0 (disabled). Call before serving.
+func (s *streamState) setRecoveryCooldown(d time.Duration) {
+	if d < 0 {
+		d = 0
+	}
+	s.mu.Lock()
+	s.recoveryCooldown = d
+	s.mu.Unlock()
+}
+
+// clockNow reads the current time via the injectable seam, defaulting to time.Now
+// if unset — defensive against a future bare streamState literal (a nil seam would
+// otherwise panic on the first watchdog fire). Call under mu.
+func (s *streamState) clockNow() time.Time {
+	if s.now == nil {
+		return time.Now()
+	}
+	return s.now()
+}
+
+// tryRecoverFallback clears a latched REST fallback if recovery is enabled
+// (recoveryCooldown > 0) and the fallback has persisted at least recoveryCooldown.
+// It is the lazy, synchronous counterpart to the watchdog: called from the
+// activation handler when the TV re-requests a stream, so a transient DTLS failure
+// no longer pins the TV to REST until restart. Returns true only when it actually
+// cleared a fallback (so the caller can log the recovery). No timer and no
+// generation token: during fallback there is no pending watchdog, so clearing the
+// flag under the lock cannot race the M1 "stream-up wins" invariant.
+func (s *streamState) tryRecoverFallback() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.fallback || s.recoveryCooldown <= 0 {
+		return false
+	}
+	if s.clockNow().Sub(s.fallbackAt) < s.recoveryCooldown {
+		return false
+	}
+	s.fallback = false
+	return true
 }
 
 // inFallback reports whether relume has fallen back to REST-follow.
@@ -312,6 +373,7 @@ func (s *streamState) watchdogFired(gen uint64, log *slog.Logger) {
 		return // stream came up, or this timer was stopped/superseded
 	}
 	s.fallback = true
+	s.fallbackAt = s.clockNow()
 	s.active = false
 	s.owner = ""
 	s.restNoticed = false

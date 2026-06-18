@@ -609,6 +609,52 @@ func TestStreamActivation_entertainmentMode_fallsBackToRESTOnDTLSTimeout(t *test
 	}
 }
 
+// End-to-end via handleGroupUpdate: once a fallback has latched, an activation
+// before the recovery cooldown still gets the legacy REST ack, but an activation
+// after the cooldown recovers entertainment and is confirmed for real. This locks
+// in that the recovery check runs BEFORE confirmsEntertainment() — a reorder would
+// make recovery silently never fire while the isolated unit test stays green.
+func TestStreamActivation_entertainmentMode_recoversFromFallbackAfterCooldown(t *testing.T) {
+	// Given: entertainment mode, a paired TV, a controllable clock and a latched fallback
+	s, ts := newTestServer(t)
+	s.EntertainmentMode = true
+	clk := time.Unix(1_000, 0)
+	s.stream.now = func() time.Time { return clk }
+	s.SetDTLSFallbackRecovery(90 * time.Second)
+	resp := mustPostUA(t, ts.URL+"/api", `{"devicetype":"Philips_TV#Ambilight","generateclientkey":true}`, tvUserAgent)
+	var paired []map[string]map[string]string
+	json.NewDecoder(resp.Body).Decode(&paired)
+	resp.Body.Close()
+	username := paired[0]["success"]["username"]
+
+	s.stream.watchdogFired(s.stream.gen, s.log) // latch fallback, stamping fallbackAt at the test clock
+	if !s.stream.inFallback() {
+		t.Fatal("precondition: should be in fallback")
+	}
+
+	// When: the TV re-activates BEFORE the cooldown elapses → still the legacy REST ack
+	before := mustPut(t, ts.URL+"/api/"+username+"/groups/1", `{"stream":{"active":true}}`)
+	var b []map[string]map[string]any
+	json.NewDecoder(before.Body).Decode(&b)
+	before.Body.Close()
+	if got := b[0]["success"]["/groups/1"]; got != "ok" {
+		t.Fatalf("before cooldown: activation must still get the legacy REST ack, got %v", b)
+	}
+
+	// When: the cooldown has elapsed and the TV re-activates → recovered + confirmed for real
+	clk = clk.Add(91 * time.Second)
+	after := mustPut(t, ts.URL+"/api/"+username+"/groups/1", `{"stream":{"active":true}}`)
+	var a []map[string]map[string]any
+	json.NewDecoder(after.Body).Decode(&a)
+	after.Body.Close()
+	if got := a[0]["success"]["/groups/1/stream/active"]; got != true {
+		t.Fatalf("after cooldown: activation must be confirmed for real (recovered), got %v", a)
+	}
+	if s.stream.inFallback() {
+		t.Fatal("fallback must be cleared after recovery")
+	}
+}
+
 func TestStreamActivation_entertainmentMode_dtlsUpCancelsWatchdog(t *testing.T) {
 	// Given: entertainment mode with a watchdog and a paired TV
 	s, ts := newTestServer(t)
@@ -708,6 +754,64 @@ func TestStreamState_genuineTimeoutFallsBack(t *testing.T) {
 	// Then: the real safety net fired.
 	if !ss.inFallback() {
 		t.Fatal("genuine timeout with no stream-up should fall back to REST")
+	}
+}
+
+// Lazy recovery: a latched REST fallback clears on the next activation attempt once
+// recoveryCooldown has elapsed (so a transient DTLS failure no longer pins the TV to
+// REST until restart), but NOT before. The injectable clock avoids sleeping.
+func TestStreamState_fallbackRecoversAfterCooldown(t *testing.T) {
+	ss := newStreamState(time.Minute)
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	clk := time.Unix(1_000, 0)
+	ss.now = func() time.Time { return clk }
+	ss.setRecoveryCooldown(90 * time.Second)
+
+	// Given: a genuine timeout latched the fallback (fired directly with the initial
+	// generation, so no real timer lingers).
+	ss.watchdogFired(ss.gen, log)
+	if !ss.inFallback() {
+		t.Fatal("precondition: should be in fallback after a genuine timeout")
+	}
+
+	// When: an activation arrives before the cooldown elapses → no recovery.
+	clk = clk.Add(30 * time.Second)
+	if ss.tryRecoverFallback() {
+		t.Fatal("must not recover before the cooldown elapses")
+	}
+	if !ss.inFallback() {
+		t.Fatal("fallback must still be latched before the cooldown")
+	}
+
+	// When: an activation arrives after the cooldown → recovery.
+	clk = clk.Add(61 * time.Second) // total 91s ≥ 90s cooldown
+	if !ss.tryRecoverFallback() {
+		t.Fatal("must recover once the cooldown has elapsed")
+	}
+	if ss.inFallback() {
+		t.Fatal("fallback must be cleared after recovery")
+	}
+}
+
+// Recovery disabled (recoveryCooldown ≤ 0) keeps the fallback sticky regardless of
+// how long it has been latched.
+func TestStreamState_fallbackStickyWhenRecoveryDisabled(t *testing.T) {
+	ss := newStreamState(time.Minute)
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	clk := time.Unix(1_000, 0)
+	ss.now = func() time.Time { return clk }
+	ss.setRecoveryCooldown(0) // disabled
+
+	ss.watchdogFired(ss.gen, log)
+	if !ss.inFallback() {
+		t.Fatal("precondition: should be in fallback")
+	}
+	clk = clk.Add(time.Hour)
+	if ss.tryRecoverFallback() {
+		t.Fatal("recovery disabled: must never recover")
+	}
+	if !ss.inFallback() {
+		t.Fatal("fallback must stay sticky when recovery is disabled")
 	}
 }
 

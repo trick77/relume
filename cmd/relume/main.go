@@ -85,6 +85,7 @@ type serveOptions struct {
 	controlledLightWindow  time.Duration
 	mode                   string
 	dtlsFallbackTimeout    time.Duration
+	dtlsFallbackRecovery   time.Duration
 	ui                     bool
 	uiPort                 int
 }
@@ -121,6 +122,7 @@ func parseServeOptions(args []string) (serveOptions, error) {
 	controlledLightWindow := fs.Duration("controlled-light-window", time.Minute, "sliding window: a light counts as a current Ambilight light only if the TV drove it within this window; the restart/idle flash and idle-off touch only those (so config changes are forgotten after the window)")
 	mode := fs.String("mode", "entertainment", "control mode: 'entertainment' (default, low-latency DTLS stream to the Pro; auto-falls back to REST if the TV never opens its stream) or 'rest' (per-light REST-follow)")
 	dtlsFallbackTimeout := fs.Duration("entertainment-dtls-timeout", 5*time.Second, "entertainment mode: how long to wait after confirming the TV's stream activation for the TV to open its DTLS stream on :2100 before reverting to REST-follow")
+	dtlsFallbackRecovery := fs.Duration("entertainment-fallback-recovery", 90*time.Second, "entertainment mode: how long a latched REST fallback persists before the next TV activation may recover it (0 disables: fallback stays sticky until restart)")
 	ui := fs.Bool("ui", false, "enable the optional web UI on the predefined port 33100 (off by default)")
 	uiPort := fs.Int("ui-port", 0, "override the web UI port (implies -ui; 0 = use -ui's default). Must differ from -http-port (80)")
 	if err := fs.Parse(args); err != nil {
@@ -141,6 +143,7 @@ func parseServeOptions(args []string) (serveOptions, error) {
 		controlledLightWindow:  *controlledLightWindow,
 		mode:                   *mode,
 		dtlsFallbackTimeout:    *dtlsFallbackTimeout,
+		dtlsFallbackRecovery:   *dtlsFallbackRecovery,
 		ui:                     *ui,
 		uiPort:                 *uiPort,
 	}, nil
@@ -214,6 +217,7 @@ func runServe(args []string, log *slog.Logger) error {
 	clip.TVIP = opts.tvIP
 	clip.EntertainmentMode = entertainmentMode
 	clip.SetDTLSFallbackTimeout(opts.dtlsFallbackTimeout)
+	clip.SetDTLSFallbackRecovery(opts.dtlsFallbackRecovery)
 	log.Info("control mode", "mode", opts.mode)
 
 	// controlled tracks the lights the TV is currently driving for Ambilight (a
@@ -354,7 +358,7 @@ func runServe(args []string, log *slog.Logger) error {
 				streamer.Stop(remote)
 			}
 			recv.OnFrame = streamer.Push
-			log.Info("entertainment mode: DTLS receiver on udp :2100 → streaming to the Pro over DTLS (REST fallback)")
+			log.Info("entertainment mode: DTLS receiver on udp :2100 → streaming to the hue bridge pro over DTLS (REST fallback)")
 		} else {
 			// No Pro paired yet: forward decoded frames to the Pro via the coalescing
 			// REST provider (Phase B) until pairing completes. The channel id IS the v1
@@ -366,7 +370,7 @@ func runServe(args []string, log *slog.Logger) error {
 					clip.ForwardLight(strconv.Itoa(int(ch.ID)), entertainment.ToHueV1State(f.ColorSpace, ch))
 				}
 			}
-			log.Info("entertainment mode: DTLS receiver on udp :2100 → REST forward (no Pro paired yet)")
+			log.Info("entertainment mode: DTLS receiver on udp :2100 → REST forward (no hue bridge pro paired yet)")
 		}
 		go func() {
 			if err := recv.Run(ctx); err != nil && ctx.Err() == nil {
