@@ -18,10 +18,6 @@ type uiSource struct {
 	advName    string
 	version    string
 	started    time.Time
-	// activeWindow is how recently the TV must have driven the lights to count as
-	// "active" in the UI. Mirrors the idle-off window so the UI reports "idle" once
-	// relume itself considers the TV gone.
-	activeWindow time.Duration
 }
 
 func (u *uiSource) Version() string      { return u.version }
@@ -51,10 +47,10 @@ func (u *uiSource) LiveColors() map[string]webui.LiveColor { return u.liveColors
 
 func (u *uiSource) StreamFPS() int { return u.frameStats.FPS() }
 
+// Active reports whether the TV is currently driving any light — tied to the same
+// 2s freshness window as the driven count, so the header "Active/Idle" state, the
+// Lights "driven" count and the flash button stay consistent (no window where the
+// header says Active while the count is 0).
 func (u *uiSource) Active() bool {
-	last := u.clip.LastActivity()
-	if last.IsZero() {
-		return false
-	}
-	return time.Since(last) < u.activeWindow
+	return len(u.liveColors.DrivenV1IDs()) > 0
 }

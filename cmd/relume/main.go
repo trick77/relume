@@ -335,22 +335,14 @@ func runServe(args []string, log *slog.Logger) error {
 	// failure is logged but never takes down the headless service.
 	if uiPort != 0 {
 		bridgeID := cfg.Identity.BridgeID()
-		// The UI counts the TV as "active" if it drove within the idle-off window, so
-		// it reports "idle" exactly when relume itself treats the TV as gone. When
-		// idle-off is disabled (0), fall back to a sensible default window.
-		activeWindow := opts.idleOffTimeout
-		if activeWindow <= 0 {
-			activeWindow = 30 * time.Second
-		}
 		src := &uiSource{
-			cfg:          cfg,
-			clip:         clip,
-			liveColors:   liveColors,
-			frameStats:   frameStats,
-			advName:      "Philips Hue - " + bridgeID[len(bridgeID)-6:],
-			version:      version,
-			started:      time.Now(),
-			activeWindow: activeWindow,
+			cfg:        cfg,
+			clip:       clip,
+			liveColors: liveColors,
+			frameStats: frameStats,
+			advName:    "Philips Hue - " + bridgeID[len(bridgeID)-6:],
+			version:    version,
+			started:    time.Now(),
 		}
 		flash := func() error {
 			pro := cfg.GetPro()
