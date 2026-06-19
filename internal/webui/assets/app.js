@@ -77,20 +77,24 @@ function cap(str) {
 }
 
 // _startedAtMs holds relume's start time (ms epoch) so the uptime can tick every
-// second between snapshot pushes. fmtUptime renders only the largest unit: days
-// once uptime reaches a day, hours past an hour, otherwise minutes/seconds.
+// second between snapshot pushes. fmtUptime renders only the largest unit, spelled
+// out with correct singular/plural: weeks once past 7 days, then days/hours/
+// minutes/seconds (e.g. "1 week", "2 days", "1 hour", "50 seconds").
 let _startedAtMs = null;
 function fmtUptime(ms) {
   if (!(ms >= 0)) return "";
+  const unit = (n, name) => `${n} ${name}${n === 1 ? "" : "s"}`;
   const s = Math.floor(ms / 1000);
+  const w = Math.floor(s / 604800);
   const d = Math.floor(s / 86400);
   const h = Math.floor((s % 86400) / 3600);
   const m = Math.floor((s % 3600) / 60);
   const sec = s % 60;
-  if (d > 0) return `${d}d`;
-  if (h > 0) return `${h}h`;
-  if (m > 0) return `${m}m`;
-  return `${sec}s`;
+  if (w > 0) return unit(w, "week");
+  if (d > 0) return unit(d, "day");
+  if (h > 0) return unit(h, "hour");
+  if (m > 0) return unit(m, "minute");
+  return unit(sec, "second");
 }
 function tickUptime() {
   const el = document.getElementById("uptime");
@@ -172,10 +176,11 @@ function renderDashboard(s) {
       <div class="top"><div class="brand">re<span>lume</span></div><div class="ver">v${esc(s.version)}</div>
         <div class="spacer"></div><div class="health"><span class="${healthDotClass(s.health)}"></span> ${esc(healthLabel(s.health))}</div></div>
       <div class="pipe">
-        <div class="step"><div class="lbl">Hue Bridge Pro</div><div class="val">${s.proPaired ? `<span class="ok">✓</span> Paired` : "— Unpaired"}${s.startedAt ? ` <span class="up" id="uptime">↑ ${esc(fmtUptime(Date.now() - Date.parse(s.startedAt)))}</span>` : ""}</div><div class="sub">${esc(s.proName)} ${esc(s.proHost)}</div></div>
+        <div class="step"><div class="lbl">Hue Bridge Pro</div><div class="val">${s.proPaired ? `<span class="ok">✓</span> Paired` : "— Unpaired"}</div><div class="sub">${esc(s.proName)} ${esc(s.proHost)}</div></div>
         <div class="step"><div class="lbl">TV pairing</div><div class="val">${s.tvClients.length} client(s)</div><div class="sub">${esc(s.tvClients.join(", "))}</div></div>
         <div class="step"><div class="lbl">Mode <span class="info" title="Entertainment: low-latency DTLS stream to the Hue Bridge Pro (default). REST: per-light REST writes — the automatic fallback when the TV is not streaming entertainment.">i</span></div><div class="val">${esc(cap(currentMode(s)))}${s.fallback ? " (fallback)" : ""}</div><div class="sub">${esc(modeSub(s))}</div></div>
         <div class="step"><div class="lbl">Lights</div><div class="val">${s.lights.length}</div><div class="sub">${driven} driven by TV</div></div>
+        <div class="step"><div class="lbl">Uptime</div><div class="val"><span id="uptime">${s.startedAt ? "↑ " + esc(fmtUptime(Date.now() - Date.parse(s.startedAt))) : "—"}</span></div><div class="sub">${s.startedAt ? "Running" : ""}</div></div>
       </div>
       <div class="grid">
         <div class="card"><h3>Lights <span class="cnt">${shown.length} shown · ${driven} driven</span></h3><div class="lights">${lights}</div></div>
