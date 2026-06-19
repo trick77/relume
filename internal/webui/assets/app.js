@@ -40,10 +40,12 @@ function healthLabel(h) {
   }[h] || h;
 }
 
-// healthDotClass colours the status dot: green when actively driving the lights,
-// amber for a degraded fallback or anything needing attention.
+// healthDotClass colours the status dot: a steady green when actively driving the
+// lights, amber for a degraded fallback or anything needing attention. Only the amber
+// states pulse — a calm "all good" should not flash; the pulse is reserved to draw the
+// eye to states that want attention.
 function healthDotClass(h) {
-  if (h === "streaming-pro" || h === "active-rest") return "dot ok pulse";
+  if (h === "streaming-pro" || h === "active-rest") return "dot ok";
   if (h === "entertainment-fallback") return "dot pulse"; // amber: degraded (DTLS failed → REST)
   if (h === "idle") return "dot pulse"; // amber standby
   return "dot pulse"; // amber: needs attention (no-tv / unpaired-pro)
