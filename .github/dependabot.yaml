@@ -1,5 +1,5 @@
 # Dependabot configuration.
-# NOTE: GitHub only recognizes this file as `.github/dependabot.yml` (not .yaml).
+# GitHub accepts both .github/dependabot.yml and .github/dependabot.yaml.
 version: 2
 updates:
   # Go modules
