@@ -22,3 +22,5 @@ coverage.out
 
 # macOS
 .DS_Store
+
+.playwright-mcp/
