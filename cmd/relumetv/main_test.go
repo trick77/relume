@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"path/filepath"
 	"testing"
@@ -67,16 +69,13 @@ func TestParseServeOptions_disableSSDP(t *testing.T) {
 	}
 }
 
-func TestParseServeOptions_bridgeProAutoPairFlags(t *testing.T) {
+func TestParseServeOptions_skipTLSFlag(t *testing.T) {
 	// When
-	opts, err := parseServeOptions([]string{"-bridge-ip", "192.0.2.50", "-skip-tls-verify"})
+	opts, err := parseServeOptions([]string{"-skip-tls-verify"})
 
 	// Then
 	if err != nil {
 		t.Fatalf("parseServeOptions: %v", err)
-	}
-	if opts.bridgeIP != "192.0.2.50" {
-		t.Errorf("bridgeIP = %q", opts.bridgeIP)
 	}
 	if !opts.skipTLS {
 		t.Fatal("skipTLS = false")
@@ -238,7 +237,6 @@ func testWatcher(t *testing.T, pro *config.BridgePro,
 	}
 	w := &proWatcher{
 		cfg:              cfg,
-		bridgeIP:         "",
 		skipTLS:          true, // skip cert fetch in tests unless a test overrides
 		log:              slog.New(slog.NewTextHandler(testWriter{t}, nil)),
 		healthCheck:      healthCheck,
@@ -536,5 +534,107 @@ func TestUIPortFor(t *testing.T) {
 				t.Fatalf("uiPortFor(headless=%v,uiPort=%d) = %d, want %d", tc.headless, tc.uiPort, got, tc.want)
 			}
 		})
+	}
+}
+
+// discardLogger is a logger that drops everything, for the selection tests.
+func discardLogger() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard, nil)) }
+
+func TestSelectProForPairing_picksFirstBSB003(t *testing.T) {
+	// Given: a multi-bridge LAN where bridges[0] is NOT a Pro and the second one is.
+	discover := func() ([]bridgepro.DiscoveredBridge, error) {
+		return []bridgepro.DiscoveredBridge{
+			{ID: "b1", InternalIPAddress: "192.0.2.10"},
+			{ID: "b2", InternalIPAddress: "192.0.2.20"},
+		}, nil
+	}
+	fetchModel := func(host string) (string, error) {
+		if host == "192.0.2.20" {
+			return bridgepro.ModelHueBridgePro, nil
+		}
+		return "BSB002", nil
+	}
+
+	// When
+	host, id, model, err := selectProForPairing(discover, fetchModel, discardLogger())
+
+	// Then: the Pro (second bridge) is chosen, never bridges[0].
+	if err != nil {
+		t.Fatalf("selectProForPairing: %v", err)
+	}
+	if host != "192.0.2.20" || id != "b2" {
+		t.Fatalf("selected host=%q id=%q, want 192.0.2.20/b2 (the BSB003), not bridges[0]", host, id)
+	}
+	if model != bridgepro.ModelHueBridgePro {
+		t.Fatalf("model = %q, want %q", model, bridgepro.ModelHueBridgePro)
+	}
+}
+
+func TestSelectProForPairing_noProAmongBridges(t *testing.T) {
+	// Given: bridges exist but none is a Pro.
+	discover := func() ([]bridgepro.DiscoveredBridge, error) {
+		return []bridgepro.DiscoveredBridge{{ID: "b1", InternalIPAddress: "192.0.2.10"}}, nil
+	}
+	fetchModel := func(string) (string, error) { return "BSB002", nil }
+
+	// When
+	host, _, _, err := selectProForPairing(discover, fetchModel, discardLogger())
+
+	// Then: precondition (b) — ErrNoProBridge, no host.
+	if host != "" {
+		t.Fatalf("host = %q, want empty (no Pro)", host)
+	}
+	if !errors.Is(err, ErrNoProBridge) {
+		t.Fatalf("err = %v, want ErrNoProBridge", err)
+	}
+}
+
+func TestSelectProForPairing_noBridgesAtAll(t *testing.T) {
+	// Given: discovery returns no bridges.
+	discover := func() ([]bridgepro.DiscoveredBridge, error) { return nil, nil }
+	fetchModel := func(string) (string, error) { return "", nil }
+
+	// When
+	host, _, _, err := selectProForPairing(discover, fetchModel, discardLogger())
+
+	// Then: precondition (a) — empty host, no error.
+	if host != "" || err != nil {
+		t.Fatalf("host=%q err=%v, want empty host and nil err (no bridge)", host, err)
+	}
+}
+
+func TestSelectProForPairing_bridgesUnreachableForModel(t *testing.T) {
+	// Given: a bridge is discovered but unreachable for its modelid.
+	discover := func() ([]bridgepro.DiscoveredBridge, error) {
+		return []bridgepro.DiscoveredBridge{{ID: "b1", InternalIPAddress: "192.0.2.10"}}, nil
+	}
+	fetchModel := func(string) (string, error) { return "", fmt.Errorf("connection refused") }
+
+	// When
+	host, _, _, err := selectProForPairing(discover, fetchModel, discardLogger())
+
+	// Then: precondition (c)-ish — ErrProModelUnknown, distinct from "not a Pro".
+	if host != "" {
+		t.Fatalf("host = %q, want empty", host)
+	}
+	if !errors.Is(err, ErrProModelUnknown) {
+		t.Fatalf("err = %v, want ErrProModelUnknown", err)
+	}
+}
+
+func TestProWatcher_checkIntervalDropsToSteadyAfterCommit(t *testing.T) {
+	w, cfg := testWatcher(t, &config.BridgePro{Host: "h", AppKey: "a"}, func(*config.BridgePro) error { return nil }, nil, nil, nil)
+	w.interval = 4 * time.Second // setup cadence
+
+	// During setup (uncommitted) the fast cadence applies.
+	if got := w.checkInterval(); got != 4*time.Second {
+		t.Fatalf("checkInterval during setup = %s, want 4s", got)
+	}
+	// After commit the watcher backs off to the gentle steady-state cadence.
+	if err := cfg.Commit(); err != nil {
+		t.Fatalf("Commit: %v", err)
+	}
+	if got := w.checkInterval(); got != 60*time.Second {
+		t.Fatalf("checkInterval after commit = %s, want 60s", got)
 	}
 }

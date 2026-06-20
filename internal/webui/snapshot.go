@@ -81,6 +81,37 @@ type Snapshot struct {
 	// card renders a longdash rather than a stale figure.
 	JitterInBri   int `json:"jitterInBri,omitempty"`
 	JitterSentBri int `json:"jitterSentBri,omitempty"`
+
+	// --- Setup wizard state (the frontend renders the wizard from these until the
+	// setup is complete). ---
+	//
+	// SetupComplete is the steady-state gate: true once the config has been committed
+	// (written to disk) AND a Pro is paired AND a TV is paired. The UI shows the
+	// dashboard iff this is true, and the wizard otherwise — so an idle/off TV after a
+	// finished setup never flips back to the wizard.
+	SetupComplete bool `json:"setupComplete"`
+	// CurrentStep is the active wizard step (1..6) from the backend state machine. The
+	// frontend renders exactly this — it does not derive steps itself.
+	CurrentStep int `json:"currentStep"`
+	// FirstRun is true when no config file existed at startup (a fresh install), for
+	// the wizard's "first run" label.
+	FirstRun bool `json:"firstRun"`
+	// DiscoveredHost is the Hue Bridge Pro host found via mDNS discovery BEFORE
+	// pairing (GetPro has no host until paired), shown as "found at <ip>" in step 1.
+	DiscoveredHost string `json:"discoveredHost,omitempty"`
+	// BridgeIsPro is whether the discovered bridge is a real Pro (modelid BSB003).
+	BridgeIsPro bool `json:"bridgeIsPro"`
+	// DiscoveryOK is whether the local mDNS discovery subsystem is working.
+	DiscoveryOK bool `json:"discoveryOK"`
+	// ProReachable is the live Pro reachability from the setup reachability poller
+	// (drives steps 3 and 5).
+	ProReachable bool `json:"proReachable"`
+	// TVDescriptorSeen is whether the TV has fetched the descriptor (step 2 signal).
+	TVDescriptorSeen bool `json:"tvDescriptorSeen"`
+	// PrecondMsg is a human-readable precondition warning for the wizard banner:
+	// (a) no bridge found, (b) the bridge is not a Pro, or (c) mDNS discovery unavailable.
+	// Empty when there is nothing to flag.
+	PrecondMsg string `json:"precondMsg,omitempty"`
 }
 
 // StateSource exposes relumeTV's live state to the snapshot builder without
@@ -131,6 +162,20 @@ type StateSource interface {
 	// the pair is fresh. ok is false when not streaming to the Pro over DTLS, so the UI
 	// shows a longdash instead of a stale reduction.
 	Jitter() (inBri, sentBri int, ok bool)
+
+	// --- Setup wizard state ---
+	// SetupComplete is the steady-state dashboard gate (committed && proPaired &&
+	// tvClients>0). True → dashboard, false → wizard.
+	SetupComplete() bool
+	// CurrentStep is the active wizard step (1..6, or the done sentinel).
+	CurrentStep() int
+	// FirstRun reports a fresh install (no config file existed at startup).
+	FirstRun() bool
+	// SetupInfo bundles the discovery preconditions and live setup signals:
+	// discoveredHost (pre-pairing Pro host), bridgeIsPro (modelid BSB003), discoveryOK
+	// (mDNS discovery working), proReachable (live), tvDescriptorSeen (step 2), and
+	// precondMsg (the wizard banner text, empty when nothing to flag).
+	SetupInfo() (discoveredHost string, bridgeIsPro, discoveryOK, proReachable, tvDescriptorSeen bool, precondMsg string)
 }
 
 func rfc3339(t time.Time) string {
@@ -178,6 +223,13 @@ func BuildSnapshot(src StateSource) Snapshot {
 		s.JitterInBri = inBri
 		s.JitterSentBri = sentBri
 	}
+
+	// Setup wizard state. The frontend renders the wizard from CurrentStep until
+	// SetupComplete flips it to the dashboard.
+	s.SetupComplete = src.SetupComplete()
+	s.CurrentStep = src.CurrentStep()
+	s.FirstRun = src.FirstRun()
+	s.DiscoveredHost, s.BridgeIsPro, s.DiscoveryOK, s.ProReachable, s.TVDescriptorSeen, s.PrecondMsg = src.SetupInfo()
 
 	switch {
 	case !paired:

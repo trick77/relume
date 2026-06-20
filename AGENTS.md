@@ -23,7 +23,7 @@ All repo content (docs, code comments, logs) is English.
   Ambilight+Hue) on the TV to reconnect.
 - env diagnostics (no -debug flood): `RELUMETV_GAP_TRACE=1` logs inter-write gaps (idle-off
   calibration). grep `ENTERTAINMENT` / `ambilight activity`.
-- commands: `serve` (default), `setup` (manual Pro pair — optional), `discover` (cloud), `avahi-service`, `version`
+- commands: `serve` (default), `avahi-service`, `version`
 - pairing is auto-accepted (no link button, no UI) — but ONLY for the TV (source IP == `-tv-ip`, or
   the Android/Dalvik Philips-TV User-Agent); other LAN devices get error 101. POST /api is
   idempotent per devicetype (TV polls it fast). Pairing needs no `link` command and no UI step — it
@@ -31,12 +31,13 @@ All repo content (docs, code comments, logs) is English.
 - web UI (setup assistant + live dashboard) is ON by default on :33100; `-headless` disables it,
   `-ui-port` moves it (must differ from -http-port). `-ui` is a kept no-op. NO auth, so under
   `network_mode: host` it is LAN-reachable by anyone — read-only, never touches the control paths.
-- backend Pro pairing is AUTOMATIC in `serve`: if no Pro is paired, a background goroutine
-  (`autoPairPro`) discovers it (cloud, or `-bridge-ip`), pins the cert, and polls until the user
-  taps the Pro's physical button (the only non-automatable step), then hot-loads lights. Runs
-  independently of the TV side. `clipv1.Server` light provider is swapped at runtime (RWMutex).
-  Once paired, `watchPro` health-checks the Pro every 60s and, on failure, re-discovers its
-  IP / re-pins the cert / hot-swaps the provider — no re-pairing (appKey/clientKey persist).
+- backend Pro pairing is AUTOMATIC in `serve`, driven by the web-UI setup wizard: if no Pro is
+  paired, a background goroutine (`autoPairPro`) discovers it via local mDNS (`_hue._tcp.local.`;
+  picks the first real Hue Bridge Pro by advertised modelid BSB003, no cloud), pins the cert, and polls
+  until the user taps the Pro's physical button (the only non-automatable step), then hot-loads
+  lights. Runs independently of the TV side. `clipv1.Server` light provider is swapped at runtime
+  (RWMutex). Once paired, `proWatcher` health-checks the Pro every 60s and, on failure, re-discovers
+  its IP (cloud) / re-pins the cert / hot-swaps the provider — no re-pairing (appKey/clientKey persist).
 - state lives in a Docker named volume `relumetv-data` (compose) at `/data/relumetv.json`.
 - container build file is `Containerfile` (not Dockerfile); compose file is `compose.yaml`
 

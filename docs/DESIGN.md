@@ -49,18 +49,19 @@ everything to CLIP v2 against the Pro.
 - `internal/entertainment` — DTLS-PSK receiver (from the TV) + the streamer (to the Pro).
 - `internal/huestream` — the HueStream wire format (parse + encode).
 - `internal/bridge` — wiring frontend↔backend, the coalescing light provider, restart/idle flashes.
-- `cmd/relumetv` — subcommands: `serve` (default), `setup`, `discover`, `avahi-service`, `version`.
+- `cmd/relumetv` — subcommands: `serve` (default), `avahi-service`, `version`.
 
 ## Pairing
 
 - **TV → relumeTV:** auto-accepted, no link button or UI. relumeTV only pairs the TV (by source IP
   matching `-tv-ip`, or the Philips-TV Android/Dalvik User-Agent); other LAN devices get error
   101. `POST /api` is idempotent per devicetype (the TV polls it quickly).
-- **relumeTV → Bridge Pro:** automatic in `serve`. If no Pro is paired, a background task discovers
-  it (cloud or `-bridge-ip`), pins its certificate, and polls until the user taps the Pro's
-  physical link button (the one non-automatable step), then hot-loads the lights. Once paired,
-  relumeTV health-checks the Pro and, on failure, re-discovers its IP / re-pins the cert without
-  re-pairing (the app key and client key persist).
+- **relumeTV → Bridge Pro:** automatic in `serve`, driven by the guided setup wizard in the web UI.
+  If no Pro is paired, a background task discovers it via **local mDNS** (`_hue._tcp.local.`, picking
+  the first real Hue Bridge Pro by its advertised modelid BSB003; no Philips cloud), pins its
+  certificate, and polls until the user taps the Pro's physical link button (the one non-automatable
+  step), then hot-loads the lights. Once paired, relumeTV health-checks the Pro and, on failure, re-discovers its
+  IP via the cloud / re-pins the cert without re-pairing (the app key and client key persist).
 
 ## Control modes
 

@@ -136,23 +136,46 @@ body {
 .logrow .msg { color: var(--dim); min-width: 0; }
 .logrow .attrs { color: var(--faint); min-width: 0; word-break: break-word; }
 
-/* setup assistant (vertical stepper) */
+/* setup assistant (vertical stepper). Each step number is vertically CENTERED in its
+   card. The connecting line between two circles is positioned by JS (layoutStepperLines)
+   from the actual circle geometry — from this circle's bottom to the next circle's top,
+   with a symmetric breathing gap so it never touches either circle. JS is used because
+   pure CSS cannot reach a centered circle in the next, variable-height card. */
 .steps { display: flex; flex-direction: column; gap: 14px; }
 .step { display: flex; gap: 16px; }
-.steps .rail { display: flex; flex-direction: column; align-items: center; }
+.steps .step { align-items: stretch; }
+.steps .rail {
+  position: relative; width: 30px; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+}
 .num {
+  position: relative; z-index: 1;
   width: 30px; height: 30px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
   font-weight: 700; font-size: 13px; flex-shrink: 0; border: 1px solid var(--line); background: var(--panel2); color: var(--dim);
 }
-.steps .line { flex: 1; width: 2px; background: var(--line); margin: 4px 0; }
+/* top/height are set by layoutStepperLines(); the rest is static styling. */
+.steps .line {
+  position: absolute; left: 50%; transform: translateX(-50%);
+  width: 2px; background: var(--line);
+}
 .steps .step.done .num { background: rgba(34, 197, 94, .15); border-color: rgba(34, 197, 94, .5); color: var(--ok); }
 .steps .step.done .line { background: rgba(34, 197, 94, .4); }
-.steps .step.active .num { background: rgba(124, 140, 255, .18); border-color: var(--accent); color: var(--accent); box-shadow: 0 0 16px rgba(124, 140, 255, .35); }
+/* Crisp spread-ring halo instead of a blurred 0 0 16px glow: the blurred glow
+   stair-steps when the circle lands on a sub-pixel row (centered against a
+   fractional-height card), which reads as a jagged ring. A solid spread ring is
+   resolution-crisp at any offset. */
+.steps .step.active .num { background: rgba(124, 140, 255, .18); border-color: var(--accent); color: var(--accent); box-shadow: 0 0 0 4px rgba(124, 140, 255, .15); }
 .steps .card { flex: 1; }
 .steps .step.active .card { border-color: rgba(124, 140, 255, .4); }
 .steps .step.todo { opacity: .55; }
-.steps .card h3 { font-size: 15px; font-weight: 650; margin-bottom: 3px; text-transform: none; letter-spacing: 0; color: var(--txt); }
-.steps .card .d { font-size: 12.5px; color: var(--dim); }
+.steps .card h3 { font-size: 16px; font-weight: 650; margin-bottom: 5px; text-transform: none; letter-spacing: 0; color: var(--txt); }
+.steps .card .d { font-size: 14px; line-height: 1.55; color: var(--dim); }
+/* Precondition banner: align with the step CARD column (rail 30 + step gap 16 = 46px),
+   so it is never wider than the step frames below, and leave a clear gap above step 1.
+   Its heading matches the step titles (16px, not the small uppercase card heading). */
+.setup-banner { margin: 0 0 14px 46px; }
+.setup-banner h3 { font-size: 16px; font-weight: 650; text-transform: none; letter-spacing: 0; margin-bottom: 5px; }
+.setup-banner .d { font-size: 14px; line-height: 1.55; color: var(--dim); }
 .pill { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .5px; padding: 3px 8px; border-radius: 6px; margin-left: auto; }
 .pill.ok { background: rgba(34, 197, 94, .15); color: var(--ok); }
 .pill.wait { background: rgba(240, 180, 41, .12); color: var(--warn); }
@@ -160,4 +183,4 @@ body {
   margin-top: 13px; display: flex; align-items: center; gap: 12px; background: var(--panel2);
   border: 1px solid var(--line); border-radius: 10px; padding: 13px 15px;
 }
-.action .big { font-size: 13px; font-weight: 600; }
+.action .big { font-size: 14px; font-weight: 600; }

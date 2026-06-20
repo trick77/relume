@@ -72,7 +72,7 @@ type BridgePro struct {
 	// BridgeID is the Hue Bridge Pro's bridge id, captured at pairing (best-effort).
 	// A stable reference in logs, independent of the IP.
 	BridgeID string `json:"bridgeId,omitempty"`
-	// DiscoveryID is the Pro's cloud-discovery id, captured at pairing, so a later
+	// DiscoveryID is the Pro's discovery id, captured at pairing, so a later
 	// re-discovery can pick THIS bridge rather than bridges[0] on a multi-bridge LAN.
 	DiscoveryID string `json:"discoveryId,omitempty"`
 }
@@ -118,10 +118,25 @@ type Config struct {
 
 	mu   sync.Mutex `json:"-"`
 	path string     `json:"-"`
+	// persist gates whether save() actually writes to disk. It is false during a
+	// fresh setup (no config file existed at Load): the whole config — including the
+	// generated identity, the Pro pairing and the TV credentials — stays in memory
+	// until Commit() flips it true and writes the file once. The file's existence
+	// therefore marks "setup complete": a restart mid-setup finds no file and starts
+	// a fresh wizard. An existing file at Load sets persist=true, so runtime updates
+	// (Pro reconnect, etc.) keep writing as before.
+	persist bool
+	// firstRun records that no config file existed at Load — i.e. this process began
+	// a fresh setup. Drives the UI's "first run" label and the avahi-service hint.
+	firstRun bool
 }
 
-// Load reads the config from path. If it does not exist, a new one with a freshly
-// generated identity is created and immediately persisted.
+// Load reads the config from path. If the file exists, the config is loaded and
+// persistence is enabled (runtime updates write through). If it does NOT exist, a
+// new config with a freshly generated identity is built IN MEMORY and NOT written:
+// persistence stays off until Commit() is called at the end of a successful setup.
+// This makes the file's existence mean "setup complete" — a restart mid-setup finds
+// no file and reruns the wizard with a fresh identity (the TV must then re-pair).
 func Load(path string) (*Config, error) {
 	c := &Config{path: path, ApiUsers: map[string]*ApiUser{}}
 
@@ -138,9 +153,10 @@ func Load(path string) (*Config, error) {
 		}
 		c.SchemaVersion = CurrentSchemaVersion
 		c.Identity = Identity{Serial: serial}
-		if serr := c.save(); serr != nil {
-			return nil, serr
-		}
+		// Deferred persistence: do NOT write the file here. It is created once by
+		// Commit() when the setup completes (TV data flowing). persist stays false so
+		// SetPro/AddApiUser/SaveEntConfigID only update memory until then.
+		c.firstRun = true
 		return c, nil
 	case err != nil:
 		return nil, fmt.Errorf("read config: %w", err)
@@ -161,7 +177,37 @@ func Load(path string) (*Config, error) {
 		c.ApiUsers = map[string]*ApiUser{}
 	}
 	c.path = path
+	// The file already existed: this is a committed install. Persist runtime updates.
+	c.persist = true
 	return c, nil
+}
+
+// Commit enables persistence and writes the config to disk exactly once, called when
+// the setup completes (the first TV data flows). It is safe to call repeatedly: after
+// the first commit persist is already true and saves behave normally. Callers must
+// not hold any external lock that save() would need.
+func (c *Config) Commit() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.persist = true
+	return c.save()
+}
+
+// Committed reports whether the config is being persisted to disk — true for an
+// install loaded from an existing file, or after Commit() during a fresh setup.
+// While false the setup is still in progress (nothing written yet).
+func (c *Config) Committed() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.persist
+}
+
+// FirstRun reports whether no config file existed at Load (a fresh install). Used
+// for the UI's "first run" label and the avahi-service completeness hint.
+func (c *Config) FirstRun() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.firstRun
 }
 
 // AddApiUser creates a new paired TV client and persists it.
@@ -267,6 +313,12 @@ func (c *Config) SaveEntConfigID(id string) error {
 // one. A failed rename removes the temp file so no garbage lingers.
 func (c *Config) save() error {
 	if c.path == "" {
+		return nil
+	}
+	// Deferred persistence: during a fresh setup nothing is written to disk until
+	// Commit() flips persist true. So SetPro/AddApiUser/SaveEntConfigID called mid-setup
+	// only mutate the in-memory config; the file appears in one atomic write at Commit().
+	if !c.persist {
 		return nil
 	}
 	// SchemaVersion is always stamped by Load (both the fresh and legacy-zero paths),

@@ -50,16 +50,13 @@ modes.
 ## Quick start (Docker)
 
 ```bash
-# 1. Start the service. On first run relumeTV auto-pairs with the Bridge Pro in the
-#    background — just briefly TAP the link button on the Pro (do not hold it).
+# 1. Start the service. Pairing with the Hue Bridge Pro runs automatically via the guided
+#    setup wizard in the web UI (local mDNS discovery) on port 33100 — just briefly TAP
+#    the link button on the Hue Bridge Pro when prompted (do not hold it).
 docker compose up -d
 
 # 2. On the TV, start the Ambilight+Hue bridge search and select relumeTV.
 #    relumeTV auto-accepts the TV's pairing — no button to press on relumeTV's side.
-
-# Optional: pair up front and verify before serving. Add -bridge-ip <ip> if cloud
-# discovery finds nothing.
-docker compose run --rm relumetv setup
 ```
 
 The image is pulled from `ghcr.io/trick77/relumetv` (built by the release workflow).
@@ -77,8 +74,6 @@ State (bridge identity, TV tokens, **Bridge Pro app key + client key**) lives in
 | Command | Purpose |
 |---------|---------|
 | `serve` | Run the service (discovery + bridge emulation). Default. |
-| `setup` | Pair with the Bridge Pro (fetch app key, pin certificate). |
-| `discover` | Find the Bridge Pro via the Philips cloud. |
 | `avahi-service` | Emit an Avahi service file (see the avahi caveat in the troubleshooting guide). |
 | `version` | Print the version. |
 
@@ -87,7 +82,6 @@ State (bridge identity, TV tokens, **Bridge Pro app key + client key**) lives in
 - **`-mode`** &nbsp;·&nbsp; default `entertainment` — Control mode: `entertainment` (low-latency DTLS stream to the Pro; auto-falls back to REST if the TV never opens its stream) or `rest` (per-light REST-follow). See [docs/DESIGN.md](docs/DESIGN.md#control-modes).
 - **`-http-port`** &nbsp;·&nbsp; default `80` — HTTP port the TV connects to. The TV hardcodes `:80` and ignores any other advertised port, so changing this will almost certainly break discovery/pairing — leave it at `80`.
 - **`-advertise-ip`** &nbsp;·&nbsp; default auto — IP advertised via mDNS/SSDP; set it on a multi-homed host.
-- **`-bridge-ip`** — Bridge Pro IP (skips cloud discovery).
 - **`-idle-off-timeout`** &nbsp;·&nbsp; default `30s` — When the TV stops driving the lights for this long, flash them and turn them off (the TV sends no off signal, it just goes silent). `0` disables.
 - **`-entertainment-dtls-timeout`** &nbsp;·&nbsp; default `5s` — Entertainment mode: how long to wait, after confirming the TV's stream activation, for the TV to open its DTLS stream before reverting to REST-follow. Raise it if a TV opens its stream slower.
 - **`-entertainment-fallback-recovery`** &nbsp;·&nbsp; default `90s` — Entertainment mode: how long a latched REST fallback persists before the next TV stream activation may recover it (so a transient DTLS failure no longer pins the TV to REST until restart). Set `0` to disable (fallback stays sticky until restart).

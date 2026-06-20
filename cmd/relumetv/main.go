@@ -6,6 +6,7 @@ package main
 import (
 	"context"
 	"encoding/hex"
+	"errors"
 	"flag"
 	"fmt"
 	"log/slog"
@@ -49,23 +50,13 @@ func main() {
 			log.Error("serve terminated", "err", err)
 			os.Exit(1)
 		}
-	case "setup":
-		if err := runSetup(os.Args[2:], log); err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			os.Exit(1)
-		}
-	case "discover":
-		if err := runDiscover(); err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			os.Exit(1)
-		}
 	case "avahi-service":
 		if err := runAvahiService(os.Args[2:]); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
 	default:
-		fmt.Fprintf(os.Stderr, "unknown command %q\nAvailable: serve, setup, discover, avahi-service\n", cmd)
+		fmt.Fprintf(os.Stderr, "unknown command %q\nAvailable: serve, avahi-service\n", cmd)
 		os.Exit(2)
 	}
 }
@@ -79,7 +70,6 @@ type serveOptions struct {
 	discoveryBurstDuration time.Duration
 	discoveryBurstInterval time.Duration
 	disableSSDP            bool
-	bridgeIP               string
 	skipTLS                bool
 	idleOffTimeout         time.Duration
 	controlledLightWindow  time.Duration
@@ -119,7 +109,6 @@ func parseServeOptions(args []string) (serveOptions, error) {
 	burstDuration := fs.Duration("discovery-burst-duration", 0, "send SSDP and mDNS discovery announcements at startup for this long")
 	burstInterval := fs.Duration("discovery-burst-interval", time.Second, "interval for discovery-burst announcements")
 	disableSSDP := fs.Bool("disable-ssdp", false, "do not run the SSDP responder (mDNS-only, like ha-hue-entertainment) — diagnostic")
-	bridgeIP := fs.String("bridge-ip", "", "Hue Bridge Pro IP for auto-pairing (empty = cloud discovery)")
 	skipTLS := fs.Bool("skip-tls-verify", false, "skip TLS verification to the Hue Bridge Pro (instead of cert pinning)")
 	idleOffTimeout := fs.Duration("idle-off-timeout", 30*time.Second, "when the TV stops sending light writes for this long, flash the lights green twice and turn them off (0 = disabled)")
 	controlledLightWindow := fs.Duration("controlled-light-window", time.Minute, "sliding window: a light counts as a current Ambilight light only if the TV drove it within this window; the restart/idle flash and idle-off touch only those (so config changes are forgotten after the window)")
@@ -142,7 +131,6 @@ func parseServeOptions(args []string) (serveOptions, error) {
 		discoveryBurstDuration: *burstDuration,
 		discoveryBurstInterval: *burstInterval,
 		disableSSDP:            *disableSSDP,
-		bridgeIP:               *bridgeIP,
 		skipTLS:                *skipTLS,
 		idleOffTimeout:         *idleOffTimeout,
 		controlledLightWindow:  *controlledLightWindow,
@@ -310,6 +298,16 @@ func runServe(args []string, log *slog.Logger) error {
 	// cut the flicker. Fed by the receiver (input) and streamer (sent) rollups below.
 	jitterStats := newJitterStats()
 
+	// setup is the backend state machine driving the wizard. It is shared by the web UI
+	// (a pure renderer) and headless operation (logs every transition), and triggers the
+	// one-shot config Commit() when the first TV data flows (step 6). active() reuses the
+	// same windowed "TV driving lights right now" signal the UI shows. Always created so
+	// uiSource can read it; on a committed install it starts at stepDone (dashboard).
+	setup := newSetupStatus(cfg, func() bool { return len(liveColors.DrivenV1IDs()) > 0 }, cfg.Commit, log)
+	// The TV re-fetches /description.xml after a reboot — the step-2 signal. Wired in both
+	// UI and headless modes (markTVDescriptorSeen only latches while step 2 is active).
+	clip.OnDescriptorFetch = setup.markTVDescriptorSeen
+
 	if pro != nil {
 		client := bridgepro.New(pro)
 		clip.SetLightProvider(newProvider(client, controlled, liveColors, proStats, log))
@@ -336,14 +334,14 @@ func runServe(args []string, log *slog.Logger) error {
 	// empty light list until the Pro pairing completes, then hot-loads the lights.
 	if pro == nil {
 		log.Warn("no hue bridge pro paired yet – auto-pairing in background; TAP the hue bridge pro link button")
-		go autoPairPro(ctx, cfg, clip, controlled, liveColors, proStats, opts.bridgeIP, opts.skipTLS, log)
+		go autoPairPro(ctx, cfg, clip, controlled, liveColors, proStats, setup, opts.skipTLS, log)
 	} else {
 		// No restart flash at startup: the controlled set is empty here (no TV write
 		// captured yet), so we have nothing to flash. The restart indicator is the
 		// shutdown flash below — on `docker compose up -d` the old container gets
 		// SIGTERM and blinks the currently-driven Ambilight bulbs red+off first.
 		// Keep the already-paired Pro reachable across reboots / IP changes.
-		w := newProWatcher(cfg, clip, controlled, liveColors, proStats, opts.bridgeIP, opts.skipTLS, log)
+		w := newProWatcher(cfg, clip, controlled, liveColors, proStats, opts.skipTLS, log)
 		go w.run(ctx)
 	}
 
@@ -360,10 +358,13 @@ func runServe(args []string, log *slog.Logger) error {
 			proSendStats: proSendStats,
 			proStats:     proStats,
 			jitterStats:  jitterStats,
-			// UI-only display name for relumeTV's own bridge. NOTE: the actual mDNS
-			// instance the TV discovers is still "Philips Hue - …" (internal/mdns),
-			// deliberately unchanged so discovery keeps working.
-			advName: "relumeTV Bridge - " + bridgeID[len(bridgeID)-6:],
+			setup:        setup,
+			// The name the TV shows for this bridge — matches the TV-facing /config
+			// name and UPnP friendlyName ("relumeTV-XXXXXX", a single token; the TV
+			// truncates at the first space). NOTE: the mDNS instance the TV discovers
+			// is still "Philips Hue - …" (internal/mdns), deliberately unchanged so
+			// discovery keeps working.
+			advName: "relumeTV-" + bridgeID[len(bridgeID)-6:],
 			version: version,
 			started: time.Now(),
 			// The configured DTLS easing time constant (ms), so the Stream card's
@@ -371,6 +372,10 @@ func runServe(args []string, log *slog.Logger) error {
 			// negative flag value clamps to 0 (smoothing off), matching the streamer.
 			smoothTauMs: int(max(0, opts.smoothTau) / time.Millisecond),
 		}
+		// Push a fresh snapshot promptly whenever the setup machine changes, so the
+		// wizard tracks transitions without waiting for the ~1s snapshot tick (and so a
+		// reachability flip in step 3/5 reaches the browser immediately).
+		setup.setOnChange(func() { uiHub.SetSnapshot(webui.BuildSnapshot(src)) })
 		uiSrv := webui.NewServer(fmt.Sprintf(":%d", uiPort), uiHub, src, log)
 		go func() {
 			if err := uiSrv.Run(ctx); err != nil {
@@ -672,29 +677,55 @@ func idleShouldFire(now, lastSeen time.Time, fired bool, idleTimeout time.Durati
 	return !fired && !lastSeen.IsZero() && now.Sub(lastSeen) >= idleTimeout
 }
 
+// setupWatcherInterval is the fast Pro health-check cadence used during setup so the
+// power-off (step 3) and power-on (step 5) transitions feel responsive in the wizard.
+const setupWatcherInterval = 4 * time.Second
+
 // autoPairPro pairs relumeTV with the Hue Bridge Pro in the background, independently of
-// the TV side. It discovers the Pro (cloud, unless bridgeIP is given), pins the
-// leaf certificate, then polls until the user taps the Pro's physical link button
-// (the one step that cannot be automated). On success it persists the credentials
-// and hot-loads the light backend so the already-paired TV starts seeing lights.
-func autoPairPro(ctx context.Context, cfg *config.Config, clip *clipv1.Server, controlled *bridge.ControlledSet, live *liveColors, stats *proStats, bridgeIP string, skipTLS bool, log *slog.Logger) {
+// the TV side. It discovers the Pro via local mDNS (the only discovery path),
+// selects the first bridge that is really a Pro (modelid BSB003), pins the leaf
+// certificate, then polls until the user taps the Pro's physical link button (the one
+// step that cannot be automated). It reports the discovery preconditions to the setup
+// wizard, and on success persists the credentials, hot-loads the light backend and
+// starts the setup reachability watcher (steps 3 & 5).
+func autoPairPro(ctx context.Context, cfg *config.Config, clip *clipv1.Server, controlled *bridge.ControlledSet, live *liveColors, stats *proStats, setup *setupStatus, skipTLS bool, log *slog.Logger) {
+	// Browse mDNS for Hue bridges, excluding relumeTV's own announcement (it advertises
+	// itself as a Hue bridge to the TV under this same bridge id).
+	discover := func() ([]bridgepro.DiscoveredBridge, error) {
+		return bridgepro.Discover(cfg.Identity.BridgeID())
+	}
 	var host, discoveryID string
 	for host == "" {
-		h, id, derr := resolveProHost(bridgeIP, "", bridgepro.Discover, log)
-		if derr == nil && h != "" {
+		h, id, modelID, derr := selectProForPairing(discover, bridgepro.FetchModelID, log)
+		switch {
+		case derr == nil && h != "":
 			host, discoveryID = h, id
-			// Make the source explicit: with no -bridge-ip the host comes from the
-			// Philips cloud (discovery.meethue.com), so a config-less relumeTV still
-			// "knows" a bridge it never stored — that is the cloud cache, not local state.
-			source := "Philips cloud (discovery.meethue.com)"
-			if bridgeIP != "" {
-				source = "-bridge-ip"
-			}
-			log.Info("hue bridge pro discovered", "host", host, "via", source)
+			log.Info("hue bridge pro discovered", "host", host, "modelid", modelID, "via", "mDNS (_hue._tcp.local)")
+			setup.setPrecond(true, host, true, "")
+		case errors.Is(derr, ErrNoProBridge):
+			// (b) a bridge was found but it is not a Pro — surface the actual modelid.
+			msg := "A Hue bridge was found, but it is not a Hue Bridge Pro (BSB003). relumeTV requires a Hue Bridge Pro."
+			log.Warn("hue bridge pro not paired yet: discovered bridge is not a Hue Bridge Pro; retrying", "err", derr)
+			setup.setPrecond(true, "", false, msg)
+		case errors.Is(derr, ErrProModelUnknown):
+			// (c)-ish a bridge was found but unreachable to confirm its modelid.
+			log.Warn("hue bridge pro not paired yet: a bridge was found but is unreachable to confirm it is a Hue Bridge Pro; retrying", "err", derr)
+			setup.setPrecond(true, "", false, "A bridge was found but could not be reached to confirm it is a Hue Bridge Pro. Is it powered on?")
+		case derr != nil:
+			// (c) the mDNS discovery subsystem itself failed (no multicast interface, etc.).
+			log.Warn("hue bridge pro not paired yet: mDNS discovery unavailable — turn the hue bridge pro on and check this host is on the same network; retrying", "err", derr)
+			setup.setPrecond(false, "", false, "Can't run local (mDNS) discovery. Turn your Hue Bridge Pro on and make sure this host is on the same network.")
+		default:
+			// (a) discovery worked but found no bridge → the Hue Bridge Pro is off/absent.
+			log.Warn("hue bridge pro not paired yet: no bridge found via mDNS — turn the hue bridge pro on; retrying")
+			setup.setPrecond(true, "", false, "No Hue Bridge Pro found yet — please turn it on and connect it to the same network.")
+		}
+		if host != "" {
 			break
 		}
-		log.Warn("hue bridge pro not paired yet: not found via cloud discovery — power the hue bridge pro on, or pass -bridge-ip; retrying", "err", derr)
-		if !sleepCtx(ctx, 15*time.Second) {
+		// mDNS is local and unthrottled, so we can retry briskly while the user powers on
+		// or connects the bridge.
+		if !sleepCtx(ctx, 10*time.Second) {
 			return
 		}
 	}
@@ -735,6 +766,16 @@ func autoPairPro(ctx context.Context, cfg *config.Config, clip *clipv1.Server, c
 	if lights, lerr := client.Lights(); lerr == nil {
 		log.Info("hue bridge pro lights available", "count", len(lights), "color", colorCapable(lights))
 	}
+	// Advance the wizard past step 1 (proPaired) promptly.
+	setup.recomputeNow()
+	// Start the setup reachability watcher: it keeps the Pro reachable (re-discover →
+	// reconnect, so a DHCP IP change after the step-5 power-cycle is followed) AND feeds
+	// setup.setReachable each tick so steps 3 and 5 advance. Faster cadence than the
+	// steady-state watcher so the power-cycle transitions feel responsive.
+	w := newProWatcher(cfg, clip, controlled, live, stats, skipTLS, log)
+	w.interval = setupWatcherInterval
+	w.onReachable = setup.setReachable
+	go w.run(ctx)
 }
 
 // reconnectProConfig builds the Hue Bridge Pro config for a reconnect: it keeps the
@@ -766,23 +807,6 @@ func sleepCtx(ctx context.Context, d time.Duration) bool {
 	}
 }
 
-// runDiscover lists bridges found on the local network via the Philips cloud.
-func runDiscover() error {
-	bridges, err := bridgepro.Discover()
-	if err != nil {
-		return err
-	}
-	if len(bridges) == 0 {
-		fmt.Println("No bridges found (cloud discovery). Use setup -bridge-ip <ip>.")
-		return nil
-	}
-	fmt.Println("Bridges found:")
-	for _, b := range bridges {
-		fmt.Printf("  id=%s  ip=%s\n", b.ID, b.InternalIPAddress)
-	}
-	return nil
-}
-
 // runAvahiService prints an Avahi static service file with which a Linux host
 // running avahi-daemon announces the _hue._tcp service. Needed when avahi
 // occupies port 5353 and relumeTV's built-in mDNS announcer therefore can't bind:
@@ -798,6 +822,14 @@ func runAvahiService(args []string) error {
 	if err != nil {
 		return err
 	}
+	// With deferred persistence, a config-less host produces a throwaway in-memory
+	// identity that does NOT match the serial a later committed setup will write. Warn
+	// so the operator regenerates this file after completing the setup (otherwise the
+	// avahi instance name won't match the running bridge).
+	if cfg.FirstRun() {
+		fmt.Fprintln(os.Stderr, "warning: no config file yet — this avahi service uses a temporary identity. "+
+			"Complete the setup first (run serve, finish the wizard), then re-run avahi-service to emit the committed identity.")
+	}
 	bridgeID := cfg.Identity.BridgeID()
 	instance := "Philips Hue - " + bridgeID[len(bridgeID)-6:]
 	fmt.Printf(`<?xml version="1.0" standalone='no'?>
@@ -812,67 +844,6 @@ func runAvahiService(args []string) error {
   </service>
 </service-group>
 `, instance, *port, bridgeID)
-	return nil
-}
-
-// runSetup pairs relumeTV with the real Hue Bridge Pro: pin the certificate,
-// wait for the link button, fetch the app key + clientkey and persist them.
-func runSetup(args []string, log *slog.Logger) error {
-	fs := flag.NewFlagSet("setup", flag.ExitOnError)
-	cfgPath := fs.String("config", "relumetv.json", "path to the configuration file")
-	bridgeIP := fs.String("bridge-ip", "", "IP of the Hue Bridge Pro (empty = cloud discovery)")
-	skipTLS := fs.Bool("skip-tls-verify", false, "disable TLS verification against the Pro (instead of cert pinning)")
-	timeout := fs.Duration("timeout", 60*time.Second, "how long to wait for the link button")
-	_ = fs.Parse(args)
-
-	cfg, err := config.Load(*cfgPath)
-	if err != nil {
-		return err
-	}
-
-	host, discoveryID, derr := resolveProHost(*bridgeIP, "", bridgepro.Discover, log)
-	if derr != nil || host == "" {
-		return fmt.Errorf("no bridge found; please specify -bridge-ip (discover: %v)", derr)
-	}
-	if *bridgeIP == "" {
-		fmt.Printf("Bridge found via cloud discovery: %s\n", host)
-	}
-
-	pro, ferr := pinProShell(host, discoveryID, *skipTLS, bridgepro.FetchLeafFingerprint)
-	if ferr != nil {
-		return fmt.Errorf("pin certificate: %w", ferr)
-	}
-	if pro.CertSHA256 != "" {
-		log.Info("certificate pinned", "sha256", pro.CertSHA256)
-	}
-
-	fmt.Printf("\n>>> Now press the link button on the Hue Bridge Pro (%s) <<<\n\n", host)
-
-	pairer := bridgepro.NewPairer("relumetv#" + hostname())
-	pairer.Interval = 2 * time.Second
-	paired, perr := pairer.WaitForLinkButton(context.Background(), pro, time.Now().Add(*timeout),
-		func(int) { fmt.Print(".") })
-	fmt.Println()
-	if perr != nil {
-		return fmt.Errorf("pairing failed (press the link button in time): %w", perr)
-	}
-
-	if err := cfg.SetPro(paired); err != nil {
-		return err
-	}
-	fmt.Println("Pairing successful, app key saved.")
-
-	// List lights as confirmation.
-	client := bridgepro.New(paired)
-	lights, lerr := client.Lights()
-	if lerr != nil {
-		fmt.Printf("Note: lights could not be read: %v\n", lerr)
-		return nil
-	}
-	fmt.Printf("%d lights found, %d color-capable:\n", len(lights), colorCapable(lights))
-	for _, l := range lights {
-		fmt.Printf("  - %s (%s)\n", l.Metadata.Name, l.ID)
-	}
 	return nil
 }
 

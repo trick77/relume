@@ -82,6 +82,12 @@ type Server struct {
 	// non-empty lights array. Wired by main to ProStreamer.SetRequestedMembers so the
 	// Pro entertainment_configuration is restricted to exactly that subset.
 	OnGroupMembers func(v1ids []uint16)
+
+	// OnDescriptorFetch, if set, is called whenever the TV (identified by isTVRequest)
+	// fetches GET /description.xml. The setup wizard uses it as the "TV rebooted"
+	// signal (step 2): a fresh TV reboot re-fetches the descriptor. Wired by main to
+	// setupStatus.markTVDescriptorSeen.
+	OnDescriptorFetch func()
 }
 
 // defaultDTLSFallbackTimeout is how long relumeTV waits, after confirming the TV's
@@ -448,6 +454,16 @@ func (s *Server) isTVRequest(r *http.Request) bool {
 }
 
 func (s *Server) handleDescription(w http.ResponseWriter, r *http.Request) {
+	// Setup wizard step-2 signal: the TV re-fetches the descriptor after a reboot. Fire
+	// the auto-advance only for the TV (isTVRequest), never an arbitrary LAN probe. Log
+	// EVERY descriptor fetch with its User-Agent and whether it was recognised as the
+	// TV, so on a real run we can confirm the auto-detection (or see exactly which UA to
+	// match if it doesn't fire — the UI fallback button covers a miss meanwhile).
+	isTV := s.isTVRequest(r)
+	s.log.Info("descriptor fetched", "tv_recognized", isTV, "user-agent", r.UserAgent(), "from", r.RemoteAddr)
+	if isTV && s.OnDescriptorFetch != nil {
+		s.OnDescriptorFetch()
+	}
 	xml, err := upnp.Render(s.cfg.Identity, s.advIP, s.httpPort)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -525,6 +541,16 @@ func (s *Server) handlePairing(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, []map[string]any{{"success": success}})
 }
 
+// bridgeIDSuffix is the last 6 characters of the 16-hex bridge id — the short, stable
+// identifier Hue uses in its mDNS instance name ("Philips Hue - XXXXXX"). Returns the
+// whole id if it is somehow shorter than 6.
+func bridgeIDSuffix(bridgeID string) string {
+	if len(bridgeID) <= 6 {
+		return bridgeID
+	}
+	return bridgeID[len(bridgeID)-6:]
+}
+
 // handleShortConfig returns the unauthenticated short config (identity check).
 func (s *Server) handleShortConfig(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, s.shortConfig())
@@ -541,7 +567,11 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 func (s *Server) shortConfig() map[string]any {
 	id := s.cfg.Identity
 	return map[string]any{
-		"name":             "relumeTV",
+		// TV-visible bridge name. Append the bridge-id suffix so the bridge is
+		// distinguishable in the TV's Ambilight+Hue picker instead of a bare "relumeTV".
+		// NO spaces: the TV truncates the displayed bridge name at the first space, so
+		// "relumeTV - XXXXXX" would show as just "relumeTV". A single token survives.
+		"name":             "relumeTV-" + bridgeIDSuffix(id.BridgeID()),
 		"datastoreversion": "131",
 		"swversion":        "1967054020",
 		"apiversion":       "1.67.0",

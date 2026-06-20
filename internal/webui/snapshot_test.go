@@ -43,6 +43,16 @@ func (f fakeSource) ForwardErrors() int               { return f.fwdErrs }
 func (f fakeSource) LastForwardErr() time.Time        { return f.lastErr }
 func (f fakeSource) SmoothingTauMs() int              { return 40 }
 func (f fakeSource) Jitter() (int, int, bool)         { return 8000, 1600, true }
+func (f fakeSource) SetupComplete() bool              { return true }
+func (f fakeSource) CurrentStep() int                 { return stepDoneSnap }
+func (f fakeSource) FirstRun() bool                   { return false }
+func (f fakeSource) SetupInfo() (string, bool, bool, bool, bool, string) {
+	return "10.0.0.5", true, true, true, true, ""
+}
+
+// stepDoneSnap mirrors cmd/relumetv's stepDone sentinel for the webui test fakes
+// (kept local so the webui package stays independent of cmd).
+const stepDoneSnap = 7
 
 func TestBuildSnapshot_MapsLightsAndDriven(t *testing.T) {
 	s := BuildSnapshot(fakeSource{driven: []string{"1"}})
@@ -162,6 +172,12 @@ func (emptySource) ForwardErrors() int               { return 0 }
 func (emptySource) LastForwardErr() time.Time        { return time.Time{} }
 func (emptySource) SmoothingTauMs() int              { return 40 }
 func (emptySource) Jitter() (int, int, bool)         { return 0, 0, false }
+func (emptySource) SetupComplete() bool              { return false }
+func (emptySource) CurrentStep() int                 { return 1 }
+func (emptySource) FirstRun() bool                   { return true }
+func (emptySource) SetupInfo() (string, bool, bool, bool, bool, string) {
+	return "", false, true, false, false, ""
+}
 
 func TestBuildSnapshot_EmptyArraysNotNil(t *testing.T) {
 	s := BuildSnapshot(emptySource{})

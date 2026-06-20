@@ -18,6 +18,7 @@ type uiSource struct {
 	proSendStats *frameStats
 	proStats     *proStats
 	jitterStats  *jitterStats
+	setup        *setupStatus
 	advName      string
 	version      string
 	started      time.Time
@@ -72,6 +73,29 @@ func (u *uiSource) SmoothingTauMs() int { return u.smoothTauMs }
 // Jitter returns the latest incoming vs smoothed-sent brightness jump and whether the
 // pair is fresh (false → UI longdash, i.e. not streaming to the Pro over DTLS).
 func (u *uiSource) Jitter() (inBri, sentBri int, ok bool) { return u.jitterStats.Reduction() }
+
+// SetupComplete is the steady-state dashboard gate: the config has been committed AND
+// a Pro is paired AND a TV is paired. Deliberately NOT the live activity signal — once
+// the setup is committed, an idle/off TV must keep showing the dashboard, never flip
+// back to the wizard (the commit, triggered by the first TV activity, is the one-shot
+// transition; this is the persisted steady state).
+func (u *uiSource) SetupComplete() bool {
+	return u.cfg.Committed() && u.cfg.GetPro() != nil && len(u.cfg.PairedDeviceTypes()) > 0
+}
+
+// CurrentStep is the active wizard step from the backend state machine.
+func (u *uiSource) CurrentStep() int { return u.setup.CurrentStep() }
+
+// FirstRun reports whether this process began a fresh setup (no config file existed).
+func (u *uiSource) FirstRun() bool { return u.cfg.FirstRun() }
+
+// SetupInfo bundles the discovery preconditions and live setup signals for the wizard.
+func (u *uiSource) SetupInfo() (discoveredHost string, bridgeIsPro, discoveryOK, proReachable, tvDescriptorSeen bool, precondMsg string) {
+	discoveryOK, discoveredHost, bridgeIsPro, precondMsg = u.setup.Precond()
+	proReachable = u.setup.ProReachable()
+	tvDescriptorSeen = u.setup.TVDescriptorSeen()
+	return discoveredHost, bridgeIsPro, discoveryOK, proReachable, tvDescriptorSeen, precondMsg
+}
 
 // Active reports whether the TV is currently driving any light — tied to the same
 // 2s freshness window as the driven count, so the header "Active/Idle" state, the
