@@ -221,7 +221,7 @@ const SETUP_STEPS = [
   {
     title: "Reboot your TV",
     body: () =>
-      "On the TV: <b>Settings → Device Preferences → About → Restart</b>. After it boots, the TV re-detects relumeTV.",
+      "On the TV: <b>Android Settings → Device Preferences → Restart</b>. After it boots, the TV re-detects relumeTV.",
     action: () =>
       `<div class="action"><span class="dot pulse"></span>
          <div><div class="big">Waiting for the TV to reboot…</div></div>

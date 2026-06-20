@@ -159,7 +159,11 @@ body {
 }
 .steps .step.done .num { background: rgba(34, 197, 94, .15); border-color: rgba(34, 197, 94, .5); color: var(--ok); }
 .steps .step.done .line { background: rgba(34, 197, 94, .4); }
-.steps .step.active .num { background: rgba(124, 140, 255, .18); border-color: var(--accent); color: var(--accent); box-shadow: 0 0 16px rgba(124, 140, 255, .35); }
+/* Crisp spread-ring halo instead of a blurred 0 0 16px glow: the blurred glow
+   stair-steps when the circle lands on a sub-pixel row (centered against a
+   fractional-height card), which reads as a jagged ring. A solid spread ring is
+   resolution-crisp at any offset. */
+.steps .step.active .num { background: rgba(124, 140, 255, .18); border-color: var(--accent); color: var(--accent); box-shadow: 0 0 0 4px rgba(124, 140, 255, .15); }
 .steps .card { flex: 1; }
 .steps .step.active .card { border-color: rgba(124, 140, 255, .4); }
 .steps .step.todo { opacity: .55; }
