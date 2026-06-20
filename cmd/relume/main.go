@@ -86,6 +86,7 @@ type serveOptions struct {
 	mode                   string
 	dtlsFallbackTimeout    time.Duration
 	dtlsFallbackRecovery   time.Duration
+	smoothTau              time.Duration
 	ui                     bool
 	uiPort                 int
 }
@@ -123,6 +124,7 @@ func parseServeOptions(args []string) (serveOptions, error) {
 	mode := fs.String("mode", "entertainment", "control mode: 'entertainment' (default, low-latency DTLS stream to the Pro; auto-falls back to REST if the TV never opens its stream) or 'rest' (per-light REST-follow)")
 	dtlsFallbackTimeout := fs.Duration("entertainment-dtls-timeout", 5*time.Second, "entertainment mode: how long to wait after confirming the TV's stream activation for the TV to open its DTLS stream on :2100 before reverting to REST-follow")
 	dtlsFallbackRecovery := fs.Duration("entertainment-fallback-recovery", 90*time.Second, "entertainment mode: how long a latched REST fallback persists before the next TV activation may recover it (0 disables: fallback stays sticky until restart)")
+	smoothTau := fs.Duration("entertainment-smooth-tau", entertainment.DefaultSmoothTau, "entertainment mode: exponential-smoothing time constant for easing the TV's hard scene cuts on the DTLS send path. Lower = snappier but more flicker, higher = smoother but laggier; 0 disables smoothing (frames forwarded verbatim)")
 	ui := fs.Bool("ui", false, "enable the optional web UI on the predefined port 33100 (off by default)")
 	uiPort := fs.Int("ui-port", 0, "override the web UI port (implies -ui; 0 = use -ui's default). Must differ from -http-port (80)")
 	if err := fs.Parse(args); err != nil {
@@ -144,6 +146,7 @@ func parseServeOptions(args []string) (serveOptions, error) {
 		mode:                   *mode,
 		dtlsFallbackTimeout:    *dtlsFallbackTimeout,
 		dtlsFallbackRecovery:   *dtlsFallbackRecovery,
+		smoothTau:              *smoothTau,
 		ui:                     *ui,
 		uiPort:                 *uiPort,
 	}, nil
@@ -359,6 +362,10 @@ func runServe(args []string, log *slog.Logger) error {
 			advName: "Relume Bridge - " + bridgeID[len(bridgeID)-6:],
 			version: version,
 			started: time.Now(),
+			// The configured DTLS easing time constant (ms), so the Stream card's
+			// tooltip reflects -entertainment-smooth-tau, not just the default. A
+			// negative flag value clamps to 0 (smoothing off), matching the streamer.
+			smoothTauMs: int(max(0, opts.smoothTau) / time.Millisecond),
 		}
 		uiSrv := webui.NewServer(fmt.Sprintf(":%d", uiPort), uiHub, src, log)
 		go func() {
@@ -402,6 +409,8 @@ func runServe(args []string, log *slog.Logger) error {
 			proClient := bridgepro.New(pro)
 			clientKey, _ := hex.DecodeString(pro.ClientKey)
 			streamer := entertainment.NewProStreamer(proClient, pro.Host, pro.AppKey, clientKey, clip.ForwardLight, log)
+			// Easing time constant for the DTLS send path (configurable; 0 = off).
+			streamer.SetSmoothTau(opts.smoothTau)
 			// Surface the live DTLS-passthrough colours to the web UI (the REST path is
 			// covered by the provider's OnColor via the fallback sink).
 			streamer.OnColor = liveColors.SetStates

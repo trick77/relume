@@ -137,9 +137,11 @@ function backpressureVal(s) {
 // backpressureSub explains the Backpressure value: coalesced frames are spared
 // writes (good), forward errors are failed writes to the Pro (bad). The sub flags
 // errors only while the warning is active, otherwise it states the benign meaning.
+// Returns ready-to-insert HTML (escaped dynamic count + a structural <br>), so the
+// call site inserts it without esc() — mirroring how streamSub's <br> is structural.
 function backpressureSub(s) {
-  if (forwardErrActive(s)) return `${s.forwardErrors} failed Hue Bridge Pro writes`;
-  return "Avoided extra writes";
+  if (forwardErrActive(s)) return `${esc(s.forwardErrors)} failed Hue Bridge Pro writes`;
+  return "Avoided extra writes<br>to Hue Bridge Pro";
 }
 
 // modeLabel renders the live forward path for display: "Entertainment" as a word,
@@ -283,8 +285,8 @@ function renderDashboard(s) {
       </div>
       <div class="pipe row2">
         <div class="step"><div class="lbl">Lights</div><div class="val">${driven}</div><div class="sub">Driven by TV</div></div>
-        <div class="step"><div class="lbl">Stream <span class="info" tabindex="0" data-tip="Jitter is the largest brightness jump between consecutive frames. relume eases each colour toward the latest TV frame with a ${s.smoothingTauMs || 40} ms time constant, so hard scene cuts reach the lamps as a fast fade — the figure is how much smaller the jump is on the sent stream than on the TV input. DTLS path only.">i</span></div><div class="val">${streamVal(s)}</div><div class="sub">${esc(streamSub(s))}<br>jitter ${jitterDisplay(s)}</div></div>
-        <div class="step"><div class="lbl">Backpressure <span class="info" tabindex="0" data-tip="Drops/s: Ambilight frames relume coalesced away because the Hue Bridge Pro could not keep up — healthy, it spares the Hue Bridge Pro writes it cannot accept. Errors: failed writes to the Hue Bridge Pro (unreachable / 503 overflow) — the real fault signal.">i</span></div><div class="val">${backpressureVal(s)}</div><div class="sub">${esc(backpressureSub(s))}</div></div>
+        <div class="step"><div class="lbl">Stream <span class="info" tabindex="0" data-tip="Jitter is the largest brightness jump between two consecutive frames. relume eases each colour toward the latest TV frame with a ${s.smoothingTauMs || 40} ms time constant, so the TV's hard scene cuts reach the lamps as a fast fade instead of a flicker. The figure is the reduction this buys: −45% means the biggest jump on the stream sent to the Hue Bridge Pro is 45% smaller than on the TV input — more negative is smoother. 0% when nothing jumped, or the cut passed through unsmoothed (e.g. tau set to 0). DTLS path only.">i</span></div><div class="val">${streamVal(s)}</div><div class="sub">${esc(streamSub(s))}<br>Jitter ${jitterDisplay(s)}</div></div>
+        <div class="step"><div class="lbl">Backpressure <span class="info" tabindex="0" data-tip="Drops/s: Ambilight frames relume coalesced away because the Hue Bridge Pro could not keep up — healthy, it spares the Hue Bridge Pro writes it cannot accept. Errors: failed writes to the Hue Bridge Pro (unreachable / 503 overflow) — the real fault signal.">i</span></div><div class="val">${backpressureVal(s)}</div><div class="sub">${backpressureSub(s)}</div></div>
         <div class="step"><div class="lbl">Liveness</div><div class="val" id="liveness">—</div><div class="sub">Since last write</div></div>
       </div>
       <div class="grid">${pending}

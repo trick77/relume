@@ -26,17 +26,14 @@ const configName = "relume"
 // content is momentarily static.
 const sendInterval = 20 * time.Millisecond // 50 Hz
 
-// smoothTau is the exponential-smoothing time constant on the DTLS send path. The TV
-// sends hard scene cuts (verified: bri/colour jumps of thousands of 16-bit units within
-// one ~40 ms frame, no black flashes or drops) which, forwarded verbatim, read as a
-// flicker. Each per-channel colour eases toward the latest TV frame with this time
-// constant so a cut reaches the lamps as a fast fade. Kept to ~one TV-frame interval so
-// the lag stays within the budget the DTLS path buys (M4) — tune here, it is the single knob.
-const smoothTau = 40 * time.Millisecond
-
-// SmoothTau exposes the easing time constant so the web UI can explain the jitter
-// reduction it produces (in the Stream card's tooltip) without hardcoding the value.
-func SmoothTau() time.Duration { return smoothTau }
+// DefaultSmoothTau is the default exponential-smoothing time constant on the DTLS send
+// path (the -entertainment-smooth-tau flag's default). The TV sends hard scene cuts
+// (verified: bri/colour jumps of thousands of 16-bit units within one ~40 ms frame, no
+// black flashes or drops) which, forwarded verbatim, read as a flicker. Each per-channel
+// colour eases toward the latest TV frame with this time constant so a cut reaches the
+// lamps as a fast fade. Kept to ~one TV-frame interval so the lag stays within the budget
+// the DTLS path buys (M4). The effective value is per-streamer (SetSmoothTau).
+const DefaultSmoothTau = 40 * time.Millisecond
 
 // snapColorDelta is the per-component distance (of 65535) within which current snaps to
 // target instead of easing. Two jobs: it terminates the geometric tail (with integer
@@ -44,28 +41,39 @@ func SmoothTau() time.Duration { return smoothTau }
 // imperceptible micro-steps once within ~0.4% of the target.
 const snapColorDelta = 256
 
-// smoothAlpha is the per-tick EMA weight derived from smoothTau and sendInterval:
-// alpha = 1 - exp(-dt/tau). Computed once so smoothTau stays the only thing to tune.
-var smoothAlpha = 1 - math.Exp(-float64(sendInterval)/float64(smoothTau))
+// defaultSmoothAlpha is the per-tick EMA weight for DefaultSmoothTau. It is also the
+// fallback used by a streamer whose tau was never set (zero-value instances in tests).
+var defaultSmoothAlpha = alphaForTau(DefaultSmoothTau)
 
-// smoothComponent eases one 16-bit colour component from cur toward tgt by smoothAlpha,
+// alphaForTau derives the per-tick EMA weight from a smoothing time constant:
+// alpha = 1 - exp(-dt/tau), with dt = sendInterval. A tau <= 0 disables smoothing
+// (alpha = 1, so frames are forwarded verbatim).
+func alphaForTau(tau time.Duration) float64 {
+	if tau <= 0 {
+		return 1
+	}
+	return 1 - math.Exp(-float64(sendInterval)/float64(tau))
+}
+
+// smoothComponent eases one 16-bit colour component from cur toward tgt by alpha,
 // snapping to tgt once within snapColorDelta (see snapColorDelta).
-func smoothComponent(cur, tgt uint16) uint16 {
+func smoothComponent(cur, tgt uint16, alpha float64) uint16 {
 	d := int(tgt) - int(cur)
 	if d <= snapColorDelta && d >= -snapColorDelta {
 		return tgt
 	}
-	return uint16(int(cur) + int(math.Round(smoothAlpha*float64(d))))
+	return uint16(int(cur) + int(math.Round(alpha*float64(d))))
 }
 
 // smoothToward eases current toward target on all three colour components (A/B/C —
-// x/y/bri in XY, r/g/b in RGB), preserving target's channel ID. See smoothTau for why.
-func smoothToward(current, target huestream.Channel) huestream.Channel {
+// x/y/bri in XY, r/g/b in RGB) by alpha, preserving target's channel ID. See
+// DefaultSmoothTau for why.
+func smoothToward(current, target huestream.Channel, alpha float64) huestream.Channel {
 	return huestream.Channel{
 		ID: target.ID,
-		A:  smoothComponent(current.A, target.A),
-		B:  smoothComponent(current.B, target.B),
-		C:  smoothComponent(current.C, target.C),
+		A:  smoothComponent(current.A, target.A, alpha),
+		B:  smoothComponent(current.B, target.B, alpha),
+		C:  smoothComponent(current.C, target.C, alpha),
 	}
 }
 
@@ -128,6 +136,12 @@ type ProStreamer struct {
 	loadCfgID func() string
 	saveCfgID func(string)
 
+	// smoothAlpha is the per-tick EMA weight for the easing on the DTLS send path,
+	// derived from the configured tau (SetSmoothTau). Set once before Start and read on
+	// the 50 Hz send path (buildFrameLocked) with no further writes, so it needs no lock.
+	// Zero means unset (zero-value test instances), handled by alpha().
+	smoothAlpha float64
+
 	mu      sync.Mutex
 	cancel  context.CancelFunc
 	running bool
@@ -180,8 +194,25 @@ func NewProStreamer(pro ProClient, host, appKey string, clientKey []byte, fallba
 	return &ProStreamer{
 		pro: pro, host: host, appKey: appKey, clientKey: clientKey,
 		fallback: fallback, log: log,
-		dial: dialPro,
+		dial:        dialPro,
+		smoothAlpha: defaultSmoothAlpha,
 	}
+}
+
+// SetSmoothTau sets the DTLS-path easing time constant (see DefaultSmoothTau). A tau
+// <= 0 disables smoothing (frames are forwarded verbatim). Call before Start; the
+// resolved per-tick weight is read on the 50 Hz send path with no further writes.
+func (s *ProStreamer) SetSmoothTau(tau time.Duration) {
+	s.smoothAlpha = alphaForTau(tau)
+}
+
+// alpha returns the per-tick easing weight, falling back to the default for a
+// zero-value streamer whose tau was never set (test instances).
+func (s *ProStreamer) alpha() float64 {
+	if s.smoothAlpha == 0 {
+		return defaultSmoothAlpha
+	}
+	return s.smoothAlpha
 }
 
 // SetRequestedMembers records the TV's entertainment-group light subset (v1 ids),
@@ -488,7 +519,7 @@ func accumSendJumps(prev, cur *huestream.Frame, briJump, colJump *uint32) {
 
 // buildFrameLocked builds the next HueStream v2 frame, easing each channel's streamed
 // colour (current) toward the latest TV colour (target) so hard cuts reach the lamps as
-// a fast fade rather than a verbatim jump (see smoothTau). A channel seen for the first
+// a fast fade rather than a verbatim jump (see DefaultSmoothTau). A channel seen for the first
 // time snaps to its value (no fade up from black). Caller holds st.mu.
 func (s *ProStreamer) buildFrameLocked() *huestream.Frame {
 	if len(s.st.latest) == 0 {
@@ -507,7 +538,7 @@ func (s *ProStreamer) buildFrameLocked() *huestream.Frame {
 		target := s.st.latest[uint8(id)]
 		next := target // first sight of a channel: snap, don't fade up from black
 		if cur, ok := s.st.current[uint8(id)]; ok {
-			next = smoothToward(cur, target)
+			next = smoothToward(cur, target, s.alpha())
 		}
 		s.st.current[uint8(id)] = next
 		channels = append(channels, next)

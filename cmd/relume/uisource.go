@@ -5,7 +5,6 @@ import (
 
 	"github.com/trick77/relume/internal/clipv1"
 	"github.com/trick77/relume/internal/config"
-	"github.com/trick77/relume/internal/entertainment"
 	"github.com/trick77/relume/internal/webui"
 )
 
@@ -22,6 +21,7 @@ type uiSource struct {
 	advName      string
 	version      string
 	started      time.Time
+	smoothTauMs  int
 }
 
 func (u *uiSource) Version() string      { return u.version }
@@ -65,11 +65,10 @@ func (u *uiSource) ForwardErrors() int { return int(u.proStats.fwdErrs.Load()) }
 // letting the UI decay the error warning once writes have been succeeding again.
 func (u *uiSource) LastForwardErr() time.Time { return u.proStats.LastForwardErr() }
 
-// SmoothingTauMs is the DTLS-path easing time constant in milliseconds — surfaced so
-// the Stream card's tooltip can explain the jitter reduction without hardcoding it.
-func (u *uiSource) SmoothingTauMs() int {
-	return int(entertainment.SmoothTau() / time.Millisecond)
-}
+// SmoothingTauMs is the configured DTLS-path easing time constant in milliseconds
+// (0 = smoothing off) — surfaced so the Stream card's tooltip can explain the jitter
+// reduction without hardcoding it.
+func (u *uiSource) SmoothingTauMs() int { return u.smoothTauMs }
 
 // Jitter returns the latest incoming vs smoothed-sent brightness jump and whether the
 // pair is fresh (false → UI longdash, i.e. not streaming to the Pro over DTLS).

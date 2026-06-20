@@ -678,7 +678,7 @@ func TestSmoothToward_convergesMonotonically(t *testing.T) {
 	prev := cur
 	reached := false
 	for i := 0; i < 200; i++ {
-		next := smoothToward(prev, target)
+		next := smoothToward(prev, target, defaultSmoothAlpha)
 		// Never overshoot: each component stays within [prev, target].
 		if next.A < prev.A || next.A > target.A ||
 			next.B < prev.B || next.B > target.B ||
@@ -699,7 +699,7 @@ func TestSmoothToward_convergesMonotonically(t *testing.T) {
 		t.Fatalf("did not reach target within 200 ticks, stuck at %v (target %v)", prev, target)
 	}
 	// First step toward 0xFFFF should land near alpha*0xFFFF, not jump verbatim.
-	first := smoothToward(huestream.Channel{ID: 3}, target)
+	first := smoothToward(huestream.Channel{ID: 3}, target, defaultSmoothAlpha)
 	if first.A > 0xC000 {
 		t.Fatalf("first step too aggressive (verbatim-ish): A=%d", first.A)
 	}
@@ -710,7 +710,7 @@ func TestSmoothToward_convergesMonotonically(t *testing.T) {
 func TestSmoothToward_snapsWhenClose(t *testing.T) {
 	cur := huestream.Channel{ID: 1, A: 1000, B: 65535, C: 0}
 	target := huestream.Channel{ID: 1, A: 1000 + snapColorDelta, B: 65535 - snapColorDelta, C: snapColorDelta}
-	got := smoothToward(cur, target)
+	got := smoothToward(cur, target, defaultSmoothAlpha)
 	if got != target {
 		t.Fatalf("within snap threshold should snap to target: got %v want %v", got, target)
 	}
@@ -768,5 +768,51 @@ func TestAccumSendJumps_smoothedStreamHasSmallerJumps(t *testing.T) {
 	}
 	if colJump >= inputJump {
 		t.Fatalf("smoothed stream jump %d should be below verbatim input jump %d", colJump, inputJump)
+	}
+}
+
+// TestAlphaForTau covers the per-tick weight derivation: a finite positive tau eases
+// (0 < alpha < 1), a smaller tau is snappier (larger alpha), and tau <= 0 disables
+// smoothing (alpha = 1, verbatim).
+func TestAlphaForTau(t *testing.T) {
+	if a := alphaForTau(0); a != 1 {
+		t.Fatalf("alphaForTau(0) = %v, want 1 (smoothing off)", a)
+	}
+	if a := alphaForTau(-5 * time.Millisecond); a != 1 {
+		t.Fatalf("alphaForTau(negative) = %v, want 1 (smoothing off)", a)
+	}
+	a := alphaForTau(DefaultSmoothTau)
+	if a <= 0 || a >= 1 {
+		t.Fatalf("alphaForTau(default) = %v, want in (0,1)", a)
+	}
+	if a != defaultSmoothAlpha {
+		t.Fatalf("alphaForTau(DefaultSmoothTau) = %v, want defaultSmoothAlpha %v", a, defaultSmoothAlpha)
+	}
+	// Smaller tau = snappier = more weight on the latest frame.
+	if alphaForTau(20*time.Millisecond) <= alphaForTau(80*time.Millisecond) {
+		t.Fatal("a smaller tau must yield a larger (snappier) alpha")
+	}
+}
+
+// TestSetSmoothTau_changesEasingRate proves the configured tau actually drives the
+// easing observed on the send path: a larger tau eases slower, and tau = 0 forwards a
+// hard cut verbatim in a single tick.
+func TestSetSmoothTau_changesEasingRate(t *testing.T) {
+	firstEasedA := func(tau time.Duration) uint16 {
+		s := &ProStreamer{}
+		s.SetSmoothTau(tau)
+		s.st.colorSpace = huestream.ColorSpaceXY
+		s.st.latest = map[uint8]huestream.Channel{7: {ID: 7, A: 0, B: 0, C: 0}}
+		s.buildFrameLocked()                                            // snap to start (0)
+		s.st.latest[7] = huestream.Channel{ID: 7, A: 50000, B: 0, C: 0} // hard cut
+		return s.buildFrameLocked().Channels[0].A
+	}
+	slow := firstEasedA(80 * time.Millisecond)
+	fast := firstEasedA(20 * time.Millisecond)
+	if slow >= fast {
+		t.Fatalf("larger tau should ease slower: slow=%d fast=%d", slow, fast)
+	}
+	if off := firstEasedA(0); off != 50000 {
+		t.Fatalf("tau=0 should forward verbatim: got A=%d want 50000", off)
 	}
 }
