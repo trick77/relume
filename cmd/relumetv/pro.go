@@ -153,11 +153,22 @@ type proWatcher struct {
 	// changed (the machine re-evaluates its level-read steps each tick).
 	onReachable func(reachable bool)
 
+	// lastDiscover throttles cloud re-discovery (discovery.meethue.com rate-limits hard).
+	// The fast reachability tick still health-checks the stored host every tick — a
+	// power-cycled Pro usually returns at the SAME IP, so it is detected immediately with
+	// no cloud call — and only falls back to cloud re-discovery at discoverThrottle cadence
+	// when the host genuinely changed. Zero value lets the first attempt through.
+	lastDiscover time.Time
+
 	healthCheck      func(*config.BridgePro) error
 	discover         func() ([]bridgepro.DiscoveredBridge, error)
 	fetchFingerprint func(host string) (string, error)
 	applyProvider    func(*config.BridgePro)
 }
+
+// discoverThrottle is the minimum spacing between cloud re-discovery attempts in the
+// watcher, independent of its (possibly fast, setup-time) health-check cadence.
+const discoverThrottle = 60 * time.Second
 
 // newProWatcher constructs a proWatcher with the production seams wired in.
 func newProWatcher(cfg *config.Config, clip *clipv1.Server, controlled *bridge.ControlledSet, live *liveColors, stats *proStats, skipTLS bool, log *slog.Logger) *proWatcher {
@@ -259,6 +270,17 @@ func (w *proWatcher) tick() (reconnected bool) {
 	w.retryLog("hue bridge pro not reachable — is it turned off? "+
 		"Turn it back on (or check its power/network cable); "+
 		"relumeTV can't control the lights until it is back. Retrying.", "", pro, "err", err)
+
+	// Throttle cloud re-discovery: the health check above already proves the stored host
+	// is down and reports it; a power-cycled Pro usually returns at the same IP (caught by
+	// the next health check, no cloud call). Only re-discover at discoverThrottle cadence,
+	// so the fast setup tick — which runs while the Pro is intentionally off for minutes —
+	// doesn't hammer the rate-limited discovery.meethue.com.
+	if !w.lastDiscover.IsZero() && time.Since(w.lastDiscover) < discoverThrottle {
+		w.reportReachable(false)
+		return false
+	}
+	w.lastDiscover = time.Now()
 
 	host, discoveryID, derr := resolveProHost(pro.DiscoveryID, w.discover, w.log)
 	if derr != nil || host == "" {

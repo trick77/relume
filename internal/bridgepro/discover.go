@@ -3,10 +3,32 @@ package bridgepro
 import (
 	"crypto/tls"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
 	"time"
 )
+
+// ErrCloudRateLimited means discovery.meethue.com answered HTTP 429 (Too Many
+// Requests): the Philips cloud is throttling our polling, not a real outage and not a
+// statement about whether a bridge exists (when not throttled it returns an empty list
+// if no bridge is present). Callers should back off — honoring RateLimitedError.RetryAfter
+// — and keep waiting rather than reporting "cloud unavailable".
+var ErrCloudRateLimited = errors.New("cloud discovery rate-limited")
+
+// RateLimitedError carries the server's Retry-After hint so callers can back off for at
+// least that long (the Philips cloud's retry-after can be many minutes; polling sooner
+// just extends the throttle). Unwraps to ErrCloudRateLimited for errors.Is checks.
+type RateLimitedError struct {
+	RetryAfter time.Duration
+}
+
+func (e *RateLimitedError) Error() string {
+	return fmt.Sprintf("cloud discovery rate-limited (retry after %s)", e.RetryAfter)
+}
+
+func (e *RateLimitedError) Unwrap() error { return ErrCloudRateLimited }
 
 // ModelHueBridgePro is the modelid a real Hue Bridge Pro reports in its
 // /api/0/config. relumeTV only drives a Pro, so a discovered bridge whose modelid
@@ -59,6 +81,11 @@ func Discover() ([]DiscoveredBridge, error) {
 		return nil, fmt.Errorf("cloud discovery: %w", err)
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusTooManyRequests {
+		// Philips throttles discovery.meethue.com aggressively (Retry-After can be many
+		// minutes). Surface it as a distinct, non-alarming error carrying the hint.
+		return nil, &RateLimitedError{RetryAfter: parseRetryAfter(resp.Header.Get("Retry-After"))}
+	}
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("cloud discovery: status %d", resp.StatusCode)
 	}
@@ -67,4 +94,24 @@ func Discover() ([]DiscoveredBridge, error) {
 		return nil, fmt.Errorf("parse cloud discovery: %w", err)
 	}
 	return bridges, nil
+}
+
+// parseRetryAfter reads a Retry-After header (delta-seconds form, which the Philips
+// cloud uses, e.g. "54"). Falls back to a conservative default when absent or
+// unparseable, and clamps to a sane ceiling so a pathological value can't stall setup.
+func parseRetryAfter(h string) time.Duration {
+	const fallback = 60 * time.Second
+	const ceiling = 5 * time.Minute
+	if h == "" {
+		return fallback
+	}
+	secs, err := strconv.Atoi(h)
+	if err != nil || secs <= 0 {
+		return fallback
+	}
+	d := time.Duration(secs) * time.Second
+	if d > ceiling {
+		return ceiling
+	}
+	return d
 }

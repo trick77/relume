@@ -2,10 +2,12 @@ package bridgepro
 
 import (
 	"crypto/tls"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 // proHost strips the scheme from a TLS test server URL, yielding the host:port that
@@ -76,5 +78,23 @@ func TestFetchModelID_SkipsTLSVerification(t *testing.T) {
 
 	if _, err := FetchModelID(proHost(t, srv)); err != nil {
 		t.Fatalf("FetchModelID against a self-signed cert: %v", err)
+	}
+}
+
+func TestDiscover_rateLimitedReturnsRateLimitedError(t *testing.T) {
+	// Discover's URL is hardcoded to the real cloud, so exercise the Retry-After parsing
+	// and the error type (the two pieces of the 429 handling) directly.
+	if got := parseRetryAfter("54"); got != 54*time.Second {
+		t.Fatalf("parseRetryAfter(54) = %s, want 54s", got)
+	}
+	if got := parseRetryAfter(""); got != 60*time.Second {
+		t.Fatalf("parseRetryAfter(empty) = %s, want 60s fallback", got)
+	}
+	if got := parseRetryAfter("99999"); got != 5*time.Minute {
+		t.Fatalf("parseRetryAfter(huge) = %s, want 5m ceiling", got)
+	}
+	var rle = &RateLimitedError{RetryAfter: 54 * time.Second}
+	if !errors.Is(rle, ErrCloudRateLimited) {
+		t.Fatal("RateLimitedError must satisfy errors.Is(ErrCloudRateLimited)")
 	}
 }
