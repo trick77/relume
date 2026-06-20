@@ -621,3 +621,20 @@ func TestSelectProForPairing_bridgesUnreachableForModel(t *testing.T) {
 		t.Fatalf("err = %v, want ErrProModelUnknown", err)
 	}
 }
+
+func TestProWatcher_checkIntervalDropsToSteadyAfterCommit(t *testing.T) {
+	w, cfg := testWatcher(t, &config.BridgePro{Host: "h", AppKey: "a"}, func(*config.BridgePro) error { return nil }, nil, nil, nil)
+	w.interval = 4 * time.Second // setup cadence
+
+	// During setup (uncommitted) the fast cadence applies.
+	if got := w.checkInterval(); got != 4*time.Second {
+		t.Fatalf("checkInterval during setup = %s, want 4s", got)
+	}
+	// After commit the watcher backs off to the gentle steady-state cadence.
+	if err := cfg.Commit(); err != nil {
+		t.Fatalf("Commit: %v", err)
+	}
+	if got := w.checkInterval(); got != 60*time.Second {
+		t.Fatalf("checkInterval after commit = %s, want 60s", got)
+	}
+}

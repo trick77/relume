@@ -113,8 +113,8 @@ func selectProForPairing(discover func() ([]bridgepro.DiscoveredBridge, error), 
 
 // pinProShell builds the *config.BridgePro shell for a host: it pins the leaf
 // certificate (unless skipTLS) and returns the shell ready for Pair. discoveryID
-// is the cloud-discovery id (empty when -bridge-ip was used) and is carried onto
-// the shell so it survives the eventual SetPro.
+// is the cloud-discovery id captured at selection and is carried onto the shell so
+// it survives the eventual SetPro (and disambiguates the bridge on later reconnects).
 func pinProShell(host, discoveryID string, skipTLS bool, fetchFingerprint func(host string) (string, error)) (*config.BridgePro, error) {
 	pro := &config.BridgePro{Host: host, SkipTLSVerify: skipTLS, DiscoveryID: discoveryID}
 	if !skipTLS {
@@ -186,14 +186,13 @@ func newProWatcher(cfg *config.Config, clip *clipv1.Server, controlled *bridge.C
 	return w
 }
 
-// run drives the health-check/reconnect cycle on a 60s interval until ctx is
-// cancelled. It backfills the Pro's name/id once up front (for installs paired
-// before those were captured), then loops calling tick.
+// run drives the health-check/reconnect cycle until ctx is cancelled. It backfills
+// the Pro's name/id once up front (for installs paired before those were captured),
+// then loops calling tick. The cadence is w.interval during setup (fast, so the
+// step 3/5 power-cycle is responsive) but drops to the gentle 60s once the setup is
+// committed — past that there is no wizard to drive and the queue-sensitive Pro
+// should not be probed every few seconds for the process's whole lifetime.
 func (w *proWatcher) run(ctx context.Context) {
-	checkInterval := w.interval
-	if checkInterval <= 0 {
-		checkInterval = 60 * time.Second
-	}
 	pro := w.cfg.GetPro()
 	if pro == nil {
 		return
@@ -211,9 +210,20 @@ func (w *proWatcher) run(ctx context.Context) {
 			}
 		}
 	}
-	for sleepCtx(ctx, checkInterval) {
+	for sleepCtx(ctx, w.checkInterval()) {
 		w.tick()
 	}
+}
+
+// checkInterval is the current health-check cadence: the configured fast setup cadence
+// while the setup is still in progress, otherwise the gentle steady-state 60s. The
+// default (interval==0) is 60s too.
+func (w *proWatcher) checkInterval() time.Duration {
+	const steady = 60 * time.Second
+	if w.interval <= 0 || w.cfg.Committed() {
+		return steady
+	}
+	return w.interval
 }
 
 // tick runs ONE health-check + maybe-reconnect cycle and reports whether it
