@@ -68,21 +68,15 @@ function modeSub(s) {
 // Pro: in DTLS mode it shows both the TV input rate and relumeTV's upsampled send rate
 // (in → out fps); on the REST paths it shows relumeTV's outgoing write rate to the Pro
 // (writes/s). Idle/unpaired states show a dash — streamSub explains why.
-// proOnDTLS reports whether the SECOND hop (relumeTV → Hue Bridge Pro) is actually on
-// DTLS. The TV→relumeTV stream being up (health streaming-pro) does NOT imply it: if
-// relumeTV's own DTLS stream to the Pro didn't establish, it forwards over REST instead,
-// which shows as proSendFps 0 with a non-zero proWriteRate. Derive the real path from
-// those rates so the card never claims "DTLS → Hue Bridge Pro" while on REST.
-function proOnDTLS(s) {
-  return (s.proSendFps || 0) > 0;
-}
-
 function streamVal(s) {
   switch (s.health) {
     case "streaming-pro":
-      return proOnDTLS(s)
+      // Show the upsampled send rate (in → out) only when relumeTV is pushing its own
+      // frames (proSendFps>0); otherwise show just the TV input rate rather than a
+      // confusing "→ 0". Entertainment is up either way.
+      return (s.proSendFps || 0) > 0
         ? `<span class="ok">●</span> ${s.streamFps || 0} → ${s.proSendFps} fps`
-        : `<span class="warn">●</span> ${s.streamFps || 0} fps in · ${s.proWriteRate || 0} writes/s`;
+        : `<span class="ok">●</span> ${s.streamFps || 0} fps`;
     case "entertainment-fallback":
       // Amber dot: streaming, but degraded (DTLS to the Pro failed → REST fallback).
       return `<span class="warn">●</span> ${s.streamFps || 0} fps in`;
@@ -98,10 +92,7 @@ function streamVal(s) {
 // the REST paths it also carries the outgoing write rate so both directions are visible.
 function streamSub(s) {
   switch (s.health) {
-    case "streaming-pro":
-      return proOnDTLS(s)
-        ? "DTLS → Hue Bridge Pro"
-        : "REST → Hue Bridge Pro · DTLS to Pro not established";
+    case "streaming-pro": return "DTLS → Hue Bridge Pro";
     case "entertainment-fallback": return `REST fallback · ${s.proWriteRate || 0} writes/s`;
     case "active-rest": return "REST → Hue Bridge Pro";
     case "idle": return "TV not driving";
@@ -367,6 +358,7 @@ function renderDashboard(s) {
       <div class="grid">${pending}
         <div class="card"><h3>Lights <span class="cnt">${shown.length} shown · ${driven} driven</span></h3><div class="lights">${lights}</div></div>
       </div>
+      <div class="note">Tip: after relumeTV restarts, if Ambilight+Hue stops responding, open the TV's Ambilight menu and toggle the <b>Ambilight</b> function (not Hue) off and back to your setting (e.g. Vivid).</div>
       <div class="card log"><h3>Live events</h3><div id="log"></div></div>
     </div>`;
 }
