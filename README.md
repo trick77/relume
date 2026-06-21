@@ -59,6 +59,12 @@ modes.
    through pairing the Bridge Pro (a brief **TAP** of its link button when prompted — do not
    hold it), rebooting the TV, the TV's Ambilight+Hue scan, and assigning the bulbs.
 
+   ![relume-tv setup wizard](docs/wizard.png)
+
+   Once running, the dashboard shows live status:
+
+   ![relume-tv status dashboard](docs/dashboard.png)
+
 ### Data & secrets
 
 State (bridge identity, TV tokens, **Bridge Pro app key + client key**) lives in
