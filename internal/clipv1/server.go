@@ -83,6 +83,12 @@ type Server struct {
 	// Pro entertainment_configuration is restricted to exactly that subset.
 	OnGroupMembers func(v1ids []uint16)
 
+	// OnRESTControl, if set, fires once per inbound REST control call from the TV
+	// (a light-state PUT or a group-action PUT). Counts genuine REST calls only —
+	// DTLS frames take the separate OnActivity path, never these HTTP handlers. Wired
+	// by main to the restRecvStats rolling counter for the UI's "Received" card.
+	OnRESTControl func()
+
 	// OnDescriptorFetch, if set, is called whenever the TV (identified by isTVRequest)
 	// fetches GET /description.xml. The setup wizard uses it as the "TV rebooted"
 	// signal (step 2): a fresh TV reboot re-fetches the descriptor. Wired by main to
@@ -703,6 +709,9 @@ func (s *Server) handleSetLightState(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.recordWriteTime()
+	if s.OnRESTControl != nil {
+		s.OnRESTControl()
+	}
 	if s.EntertainmentMode && s.stream.noteRESTDriving() {
 		s.log.Info("entertainment mode: TV driving via per-light REST writes — no DTLS stream opened " +
 			"(not a fallback; the TV simply isn't streaming entertainment)")
@@ -836,6 +845,10 @@ func (s *Server) handleGroupAction(w http.ResponseWriter, r *http.Request) {
 	_ = json.Unmarshal(body, &action) // a malformed body leaves action nil → forwarded 0
 	forwarded := 0
 	if len(action) > 0 {
+		// One inbound REST control call, regardless of the per-light fan-out below.
+		if s.OnRESTControl != nil {
+			s.OnRESTControl()
+		}
 		for v1id := range s.lightsV1() {
 			// Defense in depth: restrict the fan-out to the TV's requested Ambilight
 			// subset so a group action never reaches lights in other rooms. With no

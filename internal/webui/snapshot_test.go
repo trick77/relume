@@ -38,6 +38,7 @@ func (f fakeSource) Active() bool                     { return true }
 func (f fakeSource) StreamFPS() int                   { return 25 }
 func (f fakeSource) ProSendFPS() int                  { return 50 }
 func (f fakeSource) ProWriteRate() int                { return 0 }
+func (f fakeSource) RestRecvRate() int                { return 0 }
 func (f fakeSource) CoalesceRate() int                { return f.coalesce }
 func (f fakeSource) ForwardErrors() int               { return f.fwdErrs }
 func (f fakeSource) LastForwardErr() time.Time        { return f.lastErr }
@@ -167,6 +168,7 @@ func (emptySource) Active() bool                     { return false }
 func (emptySource) StreamFPS() int                   { return 0 }
 func (emptySource) ProSendFPS() int                  { return 0 }
 func (emptySource) ProWriteRate() int                { return 0 }
+func (emptySource) RestRecvRate() int                { return 0 }
 func (emptySource) CoalesceRate() int                { return 0 }
 func (emptySource) ForwardErrors() int               { return 0 }
 func (emptySource) LastForwardErr() time.Time        { return time.Time{} }

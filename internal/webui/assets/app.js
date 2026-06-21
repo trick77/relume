@@ -160,37 +160,56 @@ function tickUptime() {
 // This also covers DTLS streaming: the backend marks activity per decoded frame, so
 // the card reads "live" throughout a stream, not just on the REST path.
 let _lastActivityMs = null;
-// fmtSince renders the elapsed time since the last write — "live" while it is fresh
-// (under fmtSinceLive ms), otherwise the largest spelled-out unit like fmtUptime.
+// fmtSinceLive is the freshness window: an update newer than this reads as "Live" on the
+// Liveness card; past it the card shows how long since the last update.
 const fmtSinceLive = 2500;
-function fmtSince(ms) {
-  if (!(ms >= 0)) return "—";
-  if (ms < fmtSinceLive) return "Live";
-  return fmtUptime(ms) + " ago";
-}
-// livenessSub shows the live forward rate to the Hue Bridge Pro under the Liveness
-// card, picked by mode so it reads truthfully in both: the outgoing DTLS frame rate
-// while streaming (proSendFps, falling back to the TV input rate before relumeTV emits
-// its own frames), the REST write rate on the fallback/REST paths, and "No active
-// stream" when nothing is driving the Pro.
-function livenessSub(s) {
-  switch (s.health) {
-    case "streaming-pro":          return `${s.proSendFps || s.streamFps || 0} fps`;
-    case "entertainment-fallback": return `${s.proWriteRate || 0} writes/s`;
-    case "active-rest":            return `${s.proWriteRate || 0} writes/s`;
-    default:                       return "No active stream";
+// livenessSub is the Liveness card subtitle. The throughput now lives on its own
+// Received/Sent cards, so Liveness is a pure liveness indicator: a static label while a
+// stream is live, otherwise how long since the last update ("for 49 seconds"), or a
+// cold-start note before any activity. Keyed off _lastActivityMs (the same freshness
+// livenessVal uses), so it reads truthfully without depending on health-label semantics.
+function livenessSub() {
+  if (_lastActivityMs && Date.now() - _lastActivityMs < fmtSinceLive) {
+    return "Streaming to Hue Bridge Pro";
   }
+  if (!_lastActivityMs) return "No updates yet";
+  return "for " + fmtUptime(Date.now() - _lastActivityMs);
 }
+// livenessVal is the Liveness card value: always just the dotted status (● Live / ● Idle).
+// The elapsed-since-last-update detail lives in the subtitle (livenessSub), so the value
+// never shows a duration — no number appears twice on the card.
 function livenessVal() {
-  if (!_lastActivityMs) return `<span class="idle">●</span> Idle`;
-  return Date.now() - _lastActivityMs < fmtSinceLive
-    ? `<span class="ok">●</span> Live`
-    : esc(fmtSince(Date.now() - _lastActivityMs));
+  if (_lastActivityMs && Date.now() - _lastActivityMs < fmtSinceLive) {
+    return `<span class="ok">●</span> Live`;
+  }
+  return `<span class="idle">●</span> Idle`;
 }
+// tickLiveness refreshes both the value and the subtitle every second between snapshot
+// pushes, so the "for N seconds" elapsed counts up smoothly. The subtitle is the next
+// `.sub` sibling of the value element (id "liveness").
 function tickLiveness() {
   const el = document.getElementById("liveness");
   if (!el) return;
   el.innerHTML = livenessVal();
+  const sub = el.parentElement?.querySelector(".sub");
+  if (sub) sub.textContent = livenessSub();
+}
+
+// receivedSub shows how fast relumeTV is receiving from the TV: DTLS frames/s while the TV
+// streams (incl. the outbound REST fallback — the receive side is still DTLS), else inbound
+// REST control calls/s on the plain-REST path, else a longdash. Keyed off the live counters
+// (not health) so entertainment-fallback correctly stays on fps.
+function receivedSub(s) {
+  if (s.streamFps > 0)    return `${s.streamFps} fps`;
+  if (s.restRecvRate > 0) return `${s.restRecvRate} calls/s`;
+  return "—";
+}
+// sentSub shows how fast relumeTV drives the Hue Bridge Pro: DTLS frames/s (the 50 Hz
+// sendLoop) while streaming, REST writes/s on the REST/fallback path, else a longdash.
+function sentSub(s) {
+  if (s.proSendFps > 0)   return `${s.proSendFps} fps`;
+  if (s.proWriteRate > 0) return `${s.proWriteRate} writes/s`;
+  return "—";
 }
 
 // SETUP_STEPS are the six wizard steps. body(s) returns the step's description HTML,
@@ -330,13 +349,15 @@ function renderDashboard(s) {
         <div class="step"><div class="lbl">Hue Bridge Pro</div><div class="val">${s.proPaired ? `<span class="ok">✓</span> Paired` : "— Unpaired"}</div><div class="sub">${esc(s.proHost)}${s.proBridgeId ? `<br>${esc(s.proBridgeId.toUpperCase())}` : ""}</div></div>
         <div class="step"><div class="lbl">TV pairing</div><div class="val">${s.tvClients.length ? "Philips TV" : "—"}</div><div class="sub">${s.tvClients.map(c => esc(tvModel(c))).join("<br>")}</div></div>
         <div class="step"><div class="lbl">Mode <span class="info" tabindex="0" data-tip="Entertainment: low-latency DTLS stream to the Hue Bridge Pro (default). REST: per-light REST writes — the automatic fallback when the TV is not streaming entertainment.">i</span></div><div class="val">${modeLabel(s)}${s.fallback ? " (fallback)" : ""}</div><div class="sub">${esc(proPathSub(s))}</div></div>
+        <div class="step"><div class="lbl">Liveness</div><div class="val" id="liveness">${livenessVal()}</div><div class="sub">${esc(livenessSub())}</div></div>
         <div class="step"><div class="lbl">Uptime</div><div class="val" id="uptime">${s.startedAt ? esc("↑ " + fmtUptime(Date.now() - Date.parse(s.startedAt))) : "—"}</div><div class="sub">Running</div></div>
       </div>
       <div class="pipe row2">
         <div class="step"><div class="lbl">Lights</div><div class="val">${driven}</div><div class="sub">Driven by TV</div></div>
         <div class="step"><div class="lbl">Jitter-reduction <span class="info" tabindex="0" data-tip="How much relumeTV's ${s.smoothingTauMs || 40} ms easing shrinks the biggest brightness jump on the DTLS stream to the Hue Bridge Pro vs the TV input. Higher is smoother; 0% when not streaming or nothing jumped.">i</span></div><div class="val">${jitterDisplay(s)}</div><div class="sub">vs TV input</div></div>
         <div class="step"><div class="lbl">Backpressure <span class="info" tabindex="0" data-tip="Drops/s: Ambilight frames relumeTV coalesced away because the Hue Bridge Pro could not keep up — healthy, it spares the Hue Bridge Pro writes it cannot accept. Errors: failed writes to the Hue Bridge Pro (unreachable / 503 overflow) — the real fault signal.">i</span></div><div class="val">${backpressureVal(s)}</div><div class="sub">${backpressureSub(s)}</div></div>
-        <div class="step"><div class="lbl">Liveness</div><div class="val" id="liveness">${livenessVal()}</div><div class="sub">${esc(livenessSub(s))}</div></div>
+        <div class="step"><div class="lbl">Received</div><div class="val">${esc(receivedSub(s))}</div><div class="sub">from TV</div></div>
+        <div class="step"><div class="lbl">Sent</div><div class="val">${esc(sentSub(s))}</div><div class="sub">to Hue Bridge Pro</div></div>
       </div>
       <div class="grid">${pending}
         <div class="card"><h3>Lights <span class="cnt">${shown.length} shown · ${driven} driven</span></h3><div class="lights">${lights}</div></div>

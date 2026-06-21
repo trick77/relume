@@ -11,18 +11,19 @@ import (
 // uiSource adapts relumeTV's live state to webui.StateSource. It is read-only and
 // exposes no secrets (app/client keys, cert fingerprint never leave the core).
 type uiSource struct {
-	cfg          *config.Config
-	clip         *clipv1.Server
-	liveColors   *liveColors
-	frameStats   *frameStats
-	proSendStats *frameStats
-	proStats     *proStats
-	jitterStats  *jitterStats
-	setup        *setupStatus
-	advName      string
-	version      string
-	started      time.Time
-	smoothTauMs  int
+	cfg           *config.Config
+	clip          *clipv1.Server
+	liveColors    *liveColors
+	frameStats    *frameStats
+	proSendStats  *frameStats
+	restRecvStats *frameStats
+	proStats      *proStats
+	jitterStats   *jitterStats
+	setup         *setupStatus
+	advName       string
+	version       string
+	started       time.Time
+	smoothTauMs   int
 }
 
 func (u *uiSource) Version() string      { return u.version }
@@ -52,6 +53,11 @@ func (u *uiSource) LiveColors() map[string]webui.LiveColor { return u.liveColors
 func (u *uiSource) StreamFPS() int    { return u.frameStats.FPS() }
 func (u *uiSource) ProSendFPS() int   { return u.proSendStats.FPS() }
 func (u *uiSource) ProWriteRate() int { return u.proStats.writes.FPS() }
+
+// RestRecvRate is the rate (per second) of inbound REST control calls the TV sends relumeTV
+// (per-light state PUTs + group-action PUTs) — the REST-path counterpart to StreamFPS. 0
+// unless the TV is driving over REST.
+func (u *uiSource) RestRecvRate() int { return u.restRecvStats.FPS() }
 
 // CoalesceRate is the rate (per second) of frames the optimistic REST path dropped
 // because the Hue Bridge Pro could not keep up — healthy backpressure, not an error.

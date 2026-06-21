@@ -57,6 +57,11 @@ type Snapshot struct {
 	// light, coalesced). The REST-path counterpart to ProSendFPS; non-zero only when
 	// driving the Pro over REST (fallback or plain REST-follow).
 	ProWriteRate int `json:"proWriteRate,omitempty"`
+	// RestRecvRate is the rate (per second) of inbound REST control calls the TV sends
+	// relumeTV (per-light state PUTs + group-action PUTs). The REST-path counterpart to
+	// StreamFPS on the receive side; non-zero only when the TV drives over REST. Surfaced
+	// by the UI "Received" card.
+	RestRecvRate int `json:"restRecvRate,omitempty"`
 	// CoalesceRate is the rate (per second) of frames the optimistic REST path
 	// dropped because the Hue Bridge Pro could not keep up. This is healthy backpressure
 	// (the Pro spared a write it could not accept), NOT an error — the UI must not
@@ -146,6 +151,9 @@ type StateSource interface {
 	// ProWriteRate is relumeTV's outgoing REST write rate to the Pro (writes/s). 0
 	// unless driving the Pro over REST.
 	ProWriteRate() int
+	// RestRecvRate is the rate (per second) of inbound REST control calls the TV sends
+	// relumeTV (per-light state + group-action PUTs). 0 unless the TV drives over REST.
+	RestRecvRate() int
 	// CoalesceRate is the rate (per second) of frames the optimistic REST path
 	// dropped because the Pro could not keep up — healthy backpressure, not an error.
 	CoalesceRate() int
@@ -214,6 +222,7 @@ func BuildSnapshot(src StateSource) Snapshot {
 		StreamFPS:      src.StreamFPS(),
 		ProSendFPS:     src.ProSendFPS(),
 		ProWriteRate:   src.ProWriteRate(),
+		RestRecvRate:   src.RestRecvRate(),
 		CoalesceRate:   src.CoalesceRate(),
 		ForwardErrors:  src.ForwardErrors(),
 		LastForwardErr: rfc3339(src.LastForwardErr()),

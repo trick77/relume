@@ -312,6 +312,11 @@ func runServe(args []string, log *slog.Logger) error {
 	// counters: write rate, coalesced drops/s, and cumulative forward errors. Only
 	// the DTLS or the REST counters are non-zero at a time, depending on the path.
 	proSendStats := newFrameStats()
+	// restRecvStats tracks the rate of inbound REST control calls the TV sends relumeTV
+	// (per-light state PUTs + group-action PUTs), the REST-path counterpart to frameStats'
+	// incoming DTLS rate. Surfaced as the UI "Received" card's REST reading; 0 unless the TV
+	// is driving over REST.
+	restRecvStats := newFrameStats()
 	proStats := newProStats()
 	// jitterStats holds the per-window brightness jump on the incoming TV stream vs
 	// relumeTV's smoothed sent stream, so the UI can show how much the DTLS-path easing
@@ -371,14 +376,15 @@ func runServe(args []string, log *slog.Logger) error {
 	if uiPort != 0 {
 		bridgeID := cfg.Identity.BridgeID()
 		src := &uiSource{
-			cfg:          cfg,
-			clip:         clip,
-			liveColors:   liveColors,
-			frameStats:   frameStats,
-			proSendStats: proSendStats,
-			proStats:     proStats,
-			jitterStats:  jitterStats,
-			setup:        setup,
+			cfg:           cfg,
+			clip:          clip,
+			liveColors:    liveColors,
+			frameStats:    frameStats,
+			proSendStats:  proSendStats,
+			restRecvStats: restRecvStats,
+			proStats:      proStats,
+			jitterStats:   jitterStats,
+			setup:         setup,
 			// The name the TV shows for this bridge — matches the TV-facing /config
 			// name and UPnP friendlyName ("relumeTV-XXXXXX", a single token; the TV
 			// truncates at the first space). NOTE: the mDNS instance the TV discovers
@@ -408,6 +414,11 @@ func runServe(args []string, log *slog.Logger) error {
 	// Summarize the high-frequency Ambilight light-state writes periodically instead
 	// of logging every single request (cadence derived in deriveServeConfig).
 	go clip.LogActivitySummary(ctx, sc.activityWindow)
+
+	// Count each inbound REST control call (per-light state PUT + group-action PUT) for the
+	// UI "Received" card's REST reading. Wired unconditionally — REST control drives the
+	// lights in plain REST mode and as the entertainment fallback alike.
+	clip.OnRESTControl = restRecvStats.Mark
 
 	// entStreamer is hoisted to function scope so the shutdown path can release
 	// relumeTV's own entertainment stream on the Pro synchronously (Phase D), rather
