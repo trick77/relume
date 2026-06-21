@@ -366,7 +366,10 @@ window.addEventListener("resize", () => {
 // hover showing it only for the click to immediately hide it again.
 const _canHover = window.matchMedia("(hover: hover)").matches;
 let _tipEl = null;
-let _shownIcon = null;
+// Track the shown tip by its data-tip text, NOT the icon node: renderDashboard rebuilds
+// app.innerHTML every snapshot (~1s), so the icon nodes are recreated and a stored node
+// reference would go stale — tap-to-dismiss would then never match the new node.
+let _shownKey = null;
 function tipNode() {
   if (!_tipEl) {
     _tipEl = document.createElement("div");
@@ -383,11 +386,11 @@ function showTip(icon) {
   tip.style.left = Math.min(r.left, window.innerWidth - 272) + "px";
   tip.style.top = r.bottom + 8 + "px";
   tip.classList.add("show");
-  _shownIcon = icon;
+  _shownKey = icon.getAttribute("data-tip");
 }
 function hideTip() {
   if (_tipEl) _tipEl.classList.remove("show");
-  _shownIcon = null;
+  _shownKey = null;
 }
 document.addEventListener("mouseover", (e) => {
   if (!_canHover) return;
@@ -412,7 +415,18 @@ document.addEventListener("click", (e) => {
     return;
   }
   // Tap the same icon again to dismiss; tap a different one to switch.
-  _shownIcon === icon ? hideTip() : showTip(icon);
+  _shownKey === icon.getAttribute("data-tip") ? hideTip() : showTip(icon);
+});
+// Keyboard activation (Enter/Space). focusin is gated to hover devices (so a touch tap,
+// which also focuses the icon, doesn't show-then-hide via the click); this keydown keeps
+// the tip reachable for keyboard users on non-hover devices. A bare <span> emits no
+// synthetic click on Enter, so there is no double-trigger.
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "Enter" && e.key !== " ") return;
+  const icon = e.target.closest?.(".info[data-tip]");
+  if (!icon) return;
+  e.preventDefault();
+  _shownKey === icon.getAttribute("data-tip") ? hideTip() : showTip(icon);
 });
 
 async function boot() {
