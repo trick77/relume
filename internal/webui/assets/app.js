@@ -339,7 +339,7 @@ function renderDashboard(s) {
       <div class="grid">${pending}
         <div class="card"><h3>Lights <span class="cnt">${shown.length} shown · ${driven} driven</span></h3><div class="lights">${lights}</div></div>
       </div>
-      <div class="note"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18h6"/><path d="M10 22h4"/><path d="M15.09 14c.18-.98.65-1.74 1.41-2.5A4.65 4.65 0 0 0 18 8 6 6 0 0 0 6 8c0 1 .23 2.23 1.5 3.5A4.61 4.61 0 0 1 8.91 14"/></svg><b>Tip</b> — after relumeTV restarts, if Ambilight+Hue stops responding, open the TV's Ambilight menu and toggle the <b>Ambilight</b> function (not Hue+Ambilight menu) off and back to follow video.</div>
+      <div class="note"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18h6"/><path d="M10 22h4"/><path d="M15.09 14c.18-.98.65-1.74 1.41-2.5A4.65 4.65 0 0 0 18 8 6 6 0 0 0 6 8c0 1 .23 2.23 1.5 3.5A4.61 4.61 0 0 1 8.91 14"/></svg><b>Tip</b> — after relumeTV restarts, if the hue lights stop responding, open the TV's Ambilight menu and toggle the Ambilight function (not Hue+Ambilight menu) off and back to follow video.</div>
       <div class="card log"><h3>Live events</h3><div id="log"></div></div>
     </div>`;
 }
