@@ -89,6 +89,7 @@ body {
 .pipe .val { font-size: 15px; font-weight: 600; }
 .pipe .val .ok { color: var(--ok); }
 .pipe .val .warn { color: var(--warn); }
+.pipe .val .idle { color: var(--idle); }
 .pipe .val .up { color: var(--faint); font-weight: 500; font-size: 12px; margin-left: 6px; }
 .pipe .sub { font-size: 12px; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
