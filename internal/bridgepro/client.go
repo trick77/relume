@@ -15,6 +15,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/trick77/relumetv/internal/config"
@@ -42,8 +43,10 @@ var (
 
 // decodeCLIPErrors best-effort decodes the CLIP v2 {"errors":[{"description":...}]}
 // shape from a response body and, if errors[] is non-empty, returns an
-// ErrDomain-wrapped error including the first description. A body that fails to
-// unmarshal yields no domain error (nil) — the decode is deliberately lenient.
+// ErrDomain-wrapped error including ALL descriptions joined. A 207 multi-status can
+// carry one error per attribute (e.g. several CT-only lights each rejecting color.xy);
+// surfacing only the first would hide the rest. A body that fails to unmarshal yields
+// no domain error (nil) — the decode is deliberately lenient.
 func decodeCLIPErrors(raw []byte) error {
 	var out struct {
 		Errors []struct {
@@ -54,7 +57,11 @@ func decodeCLIPErrors(raw []byte) error {
 		return nil
 	}
 	if len(out.Errors) > 0 {
-		return fmt.Errorf("%s: %w", out.Errors[0].Description, ErrDomain)
+		descs := make([]string, 0, len(out.Errors))
+		for _, e := range out.Errors {
+			descs = append(descs, e.Description)
+		}
+		return fmt.Errorf("%s: %w", strings.Join(descs, "; "), ErrDomain)
 	}
 	return nil
 }

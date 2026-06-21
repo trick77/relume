@@ -63,6 +63,25 @@ func TestSetLight_DomainError(t *testing.T) {
 	}
 }
 
+func TestSetLight_DomainError_surfacesAllDescriptions(t *testing.T) {
+	// A 207 multi-status can carry one error per attribute (e.g. several CT-only lights
+	// each rejecting color.xy). Every description must reach the error, not just the first.
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"errors":[{"description":"first failed"},{"description":"second failed"}],"data":[]}`))
+	}))
+	defer srv.Close()
+
+	c := pinnedClient(t, srv, pinOf(t, srv))
+	err := c.SetLight("light-1", map[string]any{"on": map[string]any{"on": true}})
+	if err == nil || !errors.Is(err, ErrDomain) {
+		t.Fatalf("expected ErrDomain, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "first failed") || !strings.Contains(err.Error(), "second failed") {
+		t.Fatalf("expected both descriptions in message, got %v", err)
+	}
+}
+
 func TestSetLight_QueueFull(t *testing.T) {
 	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusServiceUnavailable)

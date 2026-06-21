@@ -359,6 +359,10 @@ function render(s) {
   else renderSetup(s);
   tickUptime();
   tickLiveness();
+  renderLog();
+}
+
+function renderLog() {
   const logEl = document.getElementById("log");
   if (logEl) logEl.innerHTML = logLines.map(logRow).join("");
 }
@@ -366,8 +370,7 @@ function render(s) {
 function pushLog(e) {
   logLines.unshift(e);
   if (logLines.length > 100) logLines.pop();
-  const logEl = document.getElementById("log");
-  if (logEl) logEl.innerHTML = logLines.map(logRow).join("");
+  renderLog();
 }
 
 // Re-flow the stepper connector lines when the viewport resizes (card heights, and thus
@@ -459,9 +462,25 @@ async function boot() {
   }, 1000);
   const es = new EventSource("/api/events");
   es.onmessage = (msg) => {
-    const f = JSON.parse(msg.data);
+    // Guard the parse: one malformed frame must not throw out of the handler and
+    // wedge the live stream — skip it and keep going.
+    let f;
+    try {
+      f = JSON.parse(msg.data);
+    } catch (_) {
+      return;
+    }
     if (f.kind === "snapshot") render(f.snapshot);
     else if (f.kind === "event") pushLog(f.event);
+  };
+  es.onerror = () => {
+    // EventSource reconnects on its own; refetch the current state so a snapshot
+    // dropped or missed during the outage cannot leave the dashboard stuck on stale
+    // data. The fetch is a cached read and harmlessly fails while still disconnected.
+    fetch("/api/state")
+      .then((r) => r.json())
+      .then(render)
+      .catch(() => {});
   };
 }
 boot();

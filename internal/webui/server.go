@@ -80,35 +80,61 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("Connection", "keep-alive")
 
-	write := func(f Frame) {
-		b, _ := json.Marshal(f)
-		_, _ = w.Write([]byte("data: "))
-		_, _ = w.Write(b)
-		_, _ = w.Write([]byte("\n\n"))
+	write := func(b []byte) error {
+		if _, err := w.Write(b); err != nil {
+			return err
+		}
 		flusher.Flush()
+		return nil
+	}
+	writeFrame := func(f Frame) error {
+		b, _ := json.Marshal(f)
+		out := append([]byte("data: "), b...)
+		return write(append(out, '\n', '\n'))
 	}
 
-	// Initial paint: a fresh snapshot, then the buffered event tail.
+	// Initial paint: a fresh snapshot, then the buffered event tail. Subscribe AFTER the
+	// tail replay: subscribing first would buffer events published during the replay
+	// window onto the channel AND include them in the tail, delivering them twice (the
+	// ring carries up to 200 events — too many to seed through the 32-deep channel). The
+	// inverse gap (an event slipping through the window) is a pre-existing, cosmetic
+	// live-log nicety, not worth a duplicate on every connect.
 	snap := BuildSnapshot(s.src)
-	write(Frame{Kind: "snapshot", Snapshot: &snap})
+	if writeFrame(Frame{Kind: "snapshot", Snapshot: &snap}) != nil {
+		return
+	}
 	for _, e := range s.hub.Events() {
 		e := e
-		write(Frame{Kind: "event", Event: &e})
+		if writeFrame(Frame{Kind: "event", Event: &e}) != nil {
+			return
+		}
 	}
 
 	ch, cancel := s.hub.Subscribe()
 	defer cancel()
+
+	// A periodic heartbeat (an SSE comment) keeps intermediaries from idle-closing the
+	// stream AND surfaces a dead client: a write to a vanished peer eventually errors, so
+	// the handler returns, cancel() runs, and the snapshot loop stops polling the
+	// queue-sensitive Pro for an audience that is no longer there.
+	heartbeat := time.NewTicker(15 * time.Second)
+	defer heartbeat.Stop()
 	for {
 		select {
 		case <-r.Context().Done():
 			return
+		case <-heartbeat.C:
+			if write([]byte(": ping\n\n")) != nil {
+				return
+			}
 		case f, ok := <-ch:
 			if !ok {
 				return
 			}
-			write(f)
+			if writeFrame(f) != nil {
+				return
+			}
 		}
 	}
 }

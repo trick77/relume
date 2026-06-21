@@ -115,6 +115,10 @@ func readName(msg []byte, off int) (string, int, bool) {
 	var labels []string
 	jumped := false
 	next := off
+	// Bound the compression-pointer jumps: a crafted packet can point two offsets at
+	// each other and spin this loop forever on untrusted multicast input. A valid name
+	// can never need more jumps than there are bytes in the message.
+	jumps := 0
 	for off < len(msg) {
 		l := int(msg[off])
 		switch {
@@ -127,6 +131,10 @@ func readName(msg []byte, off int) (string, int, bool) {
 		case l&0xC0 == 0xC0: // Pointer (compression)
 			if off+1 >= len(msg) {
 				return "", off, false
+			}
+			jumps++
+			if jumps > len(msg) {
+				return "", off, false // pointer loop — bail
 			}
 			if !jumped {
 				next = off + 2
