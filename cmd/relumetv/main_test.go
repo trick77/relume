@@ -458,18 +458,27 @@ func TestParseServeOptions_DefaultModeIsEntertainment(t *testing.T) {
 	}
 }
 
-func TestParseServeOptions_IdleOffDefaultsToUnset(t *testing.T) {
+func TestParseServeOptions_IdleOffModeDefaults(t *testing.T) {
 	opts, err := parseServeOptions(nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if opts.idleOffTimeout != idleOffUnset {
-		t.Fatalf("default idle-off = %v, want sentinel %v (mode default resolved later)", opts.idleOffTimeout, idleOffUnset)
+	if opts.idleOffRest != defaultIdleOffRest {
+		t.Fatalf("default rest idle-off = %v, want %v", opts.idleOffRest, defaultIdleOffRest)
+	}
+	if opts.idleOffEntertainment != defaultIdleOffEntertainment {
+		t.Fatalf("default entertainment idle-off = %v, want %v", opts.idleOffEntertainment, defaultIdleOffEntertainment)
 	}
 }
 
 func TestDeriveServeConfig(t *testing.T) {
-	base := serveOptions{mode: "entertainment", httpPort: 80, controlledLightWindow: time.Minute}
+	base := serveOptions{
+		mode:                  "entertainment",
+		httpPort:              80,
+		controlledLightWindow: time.Minute,
+		idleOffRest:           defaultIdleOffRest,
+		idleOffEntertainment:  defaultIdleOffEntertainment,
+	}
 
 	t.Run("invalid mode is rejected", func(t *testing.T) {
 		o := base
@@ -508,7 +517,7 @@ func TestDeriveServeConfig(t *testing.T) {
 
 	t.Run("controlled window is raised to exceed idle-off", func(t *testing.T) {
 		o := base
-		o.idleOffTimeout = 50 * time.Second // window 60s < 50+15=65s → raise
+		o.idleOffEntertainment = 50 * time.Second // window 60s < 50+15=65s → raise
 		sc, _ := deriveServeConfig(o)
 		if !sc.windowRaised || sc.controlledWindow != 65*time.Second {
 			t.Fatalf("expected raised window 65s, got %+v", sc)
@@ -517,44 +526,37 @@ func TestDeriveServeConfig(t *testing.T) {
 
 	t.Run("controlled window left alone when already large enough", func(t *testing.T) {
 		o := base
-		o.idleOffTimeout = 30 * time.Second // window 60s >= 30+15=45s → keep
+		o.idleOffEntertainment = 30 * time.Second // window 60s >= 30+15=45s → keep
 		sc, _ := deriveServeConfig(o)
 		if sc.windowRaised || sc.controlledWindow != time.Minute {
 			t.Fatalf("expected unchanged 60s window, got %+v", sc)
 		}
 	})
 
-	t.Run("unset idle-off takes the entertainment-mode default", func(t *testing.T) {
+	t.Run("entertainment mode selects the entertainment idle-off", func(t *testing.T) {
 		o := base
-		o.idleOffTimeout = idleOffUnset
+		o.idleOffEntertainment = 7 * time.Second
+		o.idleOffRest = 99 * time.Second
 		sc, _ := deriveServeConfig(o)
-		if sc.idleOff != defaultIdleOffEntertainment {
-			t.Fatalf("idleOff = %v, want %v", sc.idleOff, defaultIdleOffEntertainment)
+		if sc.idleOff != 7*time.Second {
+			t.Fatalf("idleOff = %v, want 7s (entertainment value)", sc.idleOff)
 		}
 	})
 
-	t.Run("unset idle-off takes the rest-mode default", func(t *testing.T) {
+	t.Run("rest mode selects the rest idle-off", func(t *testing.T) {
 		o := base
 		o.mode = "rest"
-		o.idleOffTimeout = idleOffUnset
+		o.idleOffEntertainment = 99 * time.Second
+		o.idleOffRest = 30 * time.Second
 		sc, _ := deriveServeConfig(o)
-		if sc.idleOff != defaultIdleOffRest {
-			t.Fatalf("idleOff = %v, want %v", sc.idleOff, defaultIdleOffRest)
+		if sc.idleOff != 30*time.Second {
+			t.Fatalf("idleOff = %v, want 30s (rest value)", sc.idleOff)
 		}
 	})
 
-	t.Run("explicit idle-off overrides the mode default", func(t *testing.T) {
+	t.Run("idle-off 0 disables for the active mode", func(t *testing.T) {
 		o := base
-		o.idleOffTimeout = 12 * time.Second
-		sc, _ := deriveServeConfig(o)
-		if sc.idleOff != 12*time.Second {
-			t.Fatalf("idleOff = %v, want 12s", sc.idleOff)
-		}
-	})
-
-	t.Run("idle-off 0 disables and is not replaced by the mode default", func(t *testing.T) {
-		o := base
-		o.idleOffTimeout = 0
+		o.idleOffEntertainment = 0
 		sc, _ := deriveServeConfig(o)
 		if sc.idleOff != 0 {
 			t.Fatalf("idleOff = %v, want 0 (disabled)", sc.idleOff)

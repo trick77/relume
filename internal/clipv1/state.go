@@ -74,7 +74,8 @@ func (a *activityTracker) markActivity() {
 // idleGapLogFloor is the smallest inter-write gap worth logging when gap tracing
 // is on. It exists to calibrate the idle-off timeout: during a real viewing
 // session the largest legitimate gap (static/dark/paused scenes) must stay well
-// below the configured -idle-off-timeout.
+// below the configured idle-off timeout (-idle-off-timeout-rest /
+// -idle-off-timeout-entertainment).
 const idleGapLogFloor = time.Second
 
 // gapTrace gates the temporary inter-write gap log used to calibrate the
