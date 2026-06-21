@@ -170,7 +170,7 @@ const fmtSinceLive = 2500;
 // livenessVal uses), so it reads truthfully without depending on health-label semantics.
 function livenessSub() {
   if (_lastActivityMs && Date.now() - _lastActivityMs < fmtSinceLive) {
-    return "Streaming to Hue Bridge Pro";
+    return "Streaming<br>to Hue Bridge Pro";
   }
   if (!_lastActivityMs) return "No updates yet";
   return "for " + fmtUptime(Date.now() - _lastActivityMs);
@@ -192,7 +192,7 @@ function tickLiveness() {
   if (!el) return;
   el.innerHTML = livenessVal();
   const sub = el.parentElement?.querySelector(".sub");
-  if (sub) sub.textContent = livenessSub();
+  if (sub) sub.innerHTML = livenessSub();
 }
 
 // receivedSub shows how fast relume-tv is receiving from the TV: DTLS frames/s while the TV
@@ -349,7 +349,7 @@ function renderDashboard(s) {
         <div class="step"><div class="lbl">Hue Bridge Pro</div><div class="val">${s.proPaired ? `<span class="ok">✓</span> Paired` : "— Unpaired"}</div><div class="sub">${esc(s.proHost)}${s.proBridgeId ? `<br>${esc(s.proBridgeId.toUpperCase())}` : ""}</div></div>
         <div class="step"><div class="lbl">TV pairing</div><div class="val">${s.tvClients.length ? "Philips TV" : "—"}</div><div class="sub">${s.tvClients.map(c => esc(tvModel(c))).join("<br>")}</div></div>
         <div class="step"><div class="lbl">Mode <span class="info" tabindex="0" data-tip="Entertainment: low-latency DTLS stream to the Hue Bridge Pro (default). REST: per-light REST writes — the automatic fallback when the TV is not streaming entertainment.">i</span></div><div class="val">${modeLabel(s)}${s.fallback ? " (fallback)" : ""}</div><div class="sub">${esc(proPathSub(s))}</div></div>
-        <div class="step"><div class="lbl">Liveness</div><div class="val" id="liveness">${livenessVal()}</div><div class="sub">${esc(livenessSub())}</div></div>
+        <div class="step"><div class="lbl">Liveness</div><div class="val" id="liveness">${livenessVal()}</div><div class="sub">${livenessSub()}</div></div>
         <div class="step"><div class="lbl">Uptime</div><div class="val" id="uptime">${s.startedAt ? esc("↑ " + fmtUptime(Date.now() - Date.parse(s.startedAt))) : "—"}</div><div class="sub">Running</div></div>
       </div>
       <div class="pipe row2">
